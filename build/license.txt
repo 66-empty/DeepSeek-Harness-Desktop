@@ -1,0 +1,48 @@
+DeepSeek Harness Desktop — Installation and Use Agreement / 安装与使用协议
+
+English:
+
+1. This software is a desktop shell for the DeepSeek Harness Web interface
+   (the deepseek-harness repository). It starts the repository's own `dsh web`
+   service locally and shows the interface in a standalone window. The
+   software itself contains no model service, API keys, or cloud components.
+
+2. This software is provided "AS IS", without warranty of any kind, express or
+   implied, including but not limited to the warranties of merchantability and
+   fitness for a particular purpose. You bear all risk of use, including any
+   direct or indirect loss.
+
+3. Third-party components distributed with this software (Electron/Chromium,
+   Node.js and other open-source libraries) are governed by their respective
+   open-source licenses; license texts can be found in
+   LICENSES.chromium.html inside the installation directory and inside each
+   component package.
+
+4. You must comply with all applicable laws and regulations. Do not use this
+   software for unlawful purposes, and do not redistribute or sell this
+   installer in unauthorized environments.
+
+5. Clicking "I Agree" to continue the installation means you accept the terms
+   above; if you do not agree, cancel the installation.
+
+6. Distributors may replace this file to match their own distribution terms
+   before repackaging.
+
+中文:
+
+1. 本软件是 DeepSeek Harness(deepseek-harness 仓库)Web 界面的桌面外壳,用于在
+   本机后台启动仓库自带的 dsh web 服务并在独立窗口中展示界面;软件本身不包含
+   模型服务、API 密钥或任何云端组件。
+
+2. 本软件按"现状"(AS IS)提供,不附带任何明示或默示担保,包括但不限于适销性
+   与特定用途适用性。因使用本软件而产生的任何直接或间接损失由使用者自行承担。
+
+3. 本软件随附的第三方组件(Electron/Chromium、Node.js 及其它开源库)遵循各自
+   的开源许可证;许可文本可在安装目录的 LICENSES.chromium.html 与各组件包内查阅。
+
+4. 使用者应遵守所在地法律法规,不得将本软件用于任何违法用途;请勿在未授权环境
+   中分发或商用本安装程序。
+
+5. 点击"接受"继续安装即表示同意以上条款;如不同意,请取消安装。
+
+6. 分发者可根据实际发行范围替换本文件后重新打包。

@@ -1,0 +1,52 @@
+name: build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  test:
+    name: Engine self-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node provision.js --selftest
+
+  package:
+    name: Package Windows installers
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build NSIS installer + portable exe
+        run: npm run dist
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            release/DeepSeek-Harness-Desktop-Setup-*.exe
+            release/DeepSeek-Harness-Desktop-Setup-*.exe.blockmap
+            release/DeepSeek-Harness-Desktop-Portable-*.exe
+            release/builder-effective-config.yaml
+      - name: Publish GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/DeepSeek-Harness-Desktop-Setup-*.exe
+            release/DeepSeek-Harness-Desktop-Setup-*.exe.blockmap
+            release/DeepSeek-Harness-Desktop-Portable-*.exe
+          generate_release_notes: true

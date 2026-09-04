@@ -1,0 +1,23 @@
+# Dependencies & build output
+node_modules/
+release/
+dist/
+
+# Runtime state (machine-specific; never commit)
+settings.json
+runtime.manifest.local.json
+
+# Logs
+*.log
+.dsh-desktop-logs/
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+
+# Local test scratch
+*.part
+.tmp-icon-work/

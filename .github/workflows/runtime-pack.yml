@@ -1,0 +1,50 @@
+name: runtime-pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'deepseek-harness tag to bundle (e.g. dsh-v0.1.2-alpha.5)'
+        required: false
+        default: 'dsh-v0.1.2-alpha.5'
+
+# Builds the optional "prebuilt runtime pack" (portable Node + installed &
+# built deepseek-harness checkout) on GitHub runners. Heavy: it clones the
+# upstream repository, runs pnpm install + build, then packages everything
+# with scripts/make-runtime-pack.js.
+jobs:
+  pack:
+    name: Build runtime pack
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: shell
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Checkout deepseek-harness @ input ref
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ inputs.ref }}
+          path: harness
+      - name: Prepare pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+      - name: Install dependencies
+        working-directory: harness
+        run: pnpm install --frozen-lockfile
+      - name: Build deepseek-harness
+        working-directory: harness
+        run: pnpm run build
+      - name: Package runtime zip
+        working-directory: shell
+        run: node scripts/make-runtime-pack.js --repo "$env:GITHUB_WORKSPACE/harness" --ref "${{ inputs.ref }}"
+      - name: Upload runtime pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-runtime
+          path: release/runtime/*.zip*
+          retention-days: 30

@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title data-i18n="page.title">DeepSeek Harness — Runtime setup</title>
+<style>
+  :root {
+    --bg: #0d1526; --panel: #131d33; --panel2: #18243d; --border: #26334d;
+    --text: #dbe4f5; --muted: #7d8db0; --accent: #4d6bfe; --ok: #34c77b;
+    --warn: #e8b339; --err: #ff6b6b; --mono: "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif; display: flex; flex-direction: column; }
+  header { padding: 14px 22px 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; -webkit-app-region: drag; }
+  header .logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, #4d6bfe, #8a5cf6); display: flex; align-items: center; justify-content: center; font-size: 16px; flex: none; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .wrap { flex: 1; display: grid; grid-template-columns: 330px 1fr; gap: 16px; padding: 16px 22px; overflow: hidden; min-height: 0; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; overflow: auto; } .col-right { min-height: 65vh; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .card h2 { margin: 0 0 10px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .col-left { display: flex; flex-direction: column; gap: 10px; overflow: auto; min-height: 0; }
+  #steps { display: flex; flex-direction: column; gap: 8px; }
+  .step { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel2); opacity: .7; }
+  .step.running { border-color: var(--accent); opacity: 1; }
+  .step.done { opacity: 1; }
+  .step.error { border-color: var(--err); opacity: 1; }
+  .step .dot { width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; border: 2px solid #41507a; flex: none; display: flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1; }
+  .step.running .dot { border-color: var(--accent); border-top-color: transparent; animation: spin .9s linear infinite; }
+  .step.done .dot { border-color: var(--ok); color: var(--ok); }
+  .step.error .dot { border-color: var(--err); color: var(--err); }
+  .step.stopped .dot { border-color: var(--warn); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .step .t { font-weight: 600; font-size: 13px; }
+  .step .s { color: var(--muted); font-size: 12px; word-break: break-all; }
+  .meta { font-size: 12px; color: var(--muted); }
+  .meta b { color: var(--text); font-weight: 600; }
+  .meta code { font-family: var(--mono); font-size: 11px; background: #0b1220; padding: 1px 5px; border-radius: 4px; }
+  .col-right { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  #note { min-height: 22px; font-size: 13.5px; }
+  #note.running { color: #aebfe8; }
+  .pbar { height: 8px; border-radius: 5px; background: #0b1220; overflow: hidden; margin-top: 8px; display: none; }
+  .pbar .fill { height: 100%; width: 0; background: linear-gradient(90deg, #4d6bfe, #8a5cf6); transition: width .2s; }
+  .pmeta { color: var(--muted); font-size: 12px; margin-top: 4px; min-height: 16px; }
+  .errbox { display: none; background: rgba(255, 107, 107, .07); border: 1px solid var(--err); color: #ffb3b3; padding: 10px 12px; border-radius: 8px; font-size: 12.5px; white-space: pre-wrap; word-break: break-all; max-height: 140px; overflow: auto; margin-top: 10px; }
+  #okbox { display: none; color: var(--ok); font-weight: 600; margin-top: 10px; }
+  #actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  button { font: inherit; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); padding: 8px 16px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { filter: brightness(1.1); }
+  button.danger { color: #ffb3b3; border-color: #5a3a3a; }
+  button:disabled { opacity: .45; cursor: default; }
+  select { font: inherit; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+  .mode-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin-top: 12px; }
+  .mode-row select { flex: none; }
+  #logbox { display: none; flex: 1; flex-direction: column; min-height: 80px; }
+  #logToggle { cursor: pointer; user-select: none; margin-bottom: 6px; }
+  pre#log { flex: 1; overflow: auto; background: #0b1220; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 0; font: 11px/1.55 var(--mono); color: #9fb0d0; white-space: pre-wrap; word-break: break-all; min-height: 50px; }
+  .foot { padding: 8px 22px 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11.5px; display: flex; gap: 18px; flex-wrap: wrap; }
+  .foot code { font-family: var(--mono); font-size: 11px; background: #0b1220; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🐋</div>
+  <div>
+    <h1 data-i18n="page.heading">DeepSeek Harness Desktop — Runtime setup</h1>
+    <div class="sub" data-i18n="page.sub">First run prepares the Node.js and deepseek-harness runtime automatically</div>
+  </div>
+</header>
+<div class="wrap">
+  <div class="col-left">
+    <div class="card">
+      <h2 data-i18n="steps.title">Steps</h2>
+      <div id="steps"><div class="step"><div class="dot"></div><div class="body"><div class="t" data-i18n="steps.waitTitle">Waiting to start</div><div class="s" data-i18n="steps.waitSub">Click "Install runtime"</div></div></div></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="plan.title">Will install</h2>
+      <div class="meta" id="meta"></div>
+    </div>
+  </div>
+  <div class="col-right">
+    <div class="card">
+      <div id="note">…</div>
+      <div class="pbar" id="pbar"><div class="fill" id="pfill"></div></div>
+      <div class="pmeta" id="pmeta"></div>
+      <div id="okbox"></div>
+      <div class="errbox" id="errbox"></div>
+      <div class="mode-row">
+        <span data-i18n="mode.label">Source:</span><select id="mode">
+          <option value="auto" data-i18n="mode.auto">Automatic</option>
+          <option value="cn" data-i18n="mode.cn">China mirrors (preferred)</option>
+          <option value="direct" data-i18n="mode.direct">Official sources</option>
+        </select>
+        <span id="modeHint"></span>
+      </div>
+      <div id="actions">
+        <button id="btnStart" class="primary" data-i18n="btn.start">Install runtime</button>
+        <button id="btnPick" data-i18n="btn.pick">Choose an existing checkout…</button>
+        <button id="btnQuit" class="danger" data-i18n="btn.quit">Quit</button>
+      </div>
+    </div>
+    <div class="card" id="logbox">
+      <h2 id="logToggle" data-i18n="log.title">Log ▾</h2>
+      <pre id="log"></pre>
+    </div>
+  </div>
+</div>
+<div class="foot">
+  <span><span data-i18n="foot.dir">Install dir:</span><code id="runtimeDir"></code></span>
+  <span id="diskNote"></span>
+</div>
+<script>
+'use strict'
+/* global __dshProvision */
+const $ = (id) => document.getElementById(id)
+const DICTS = {
+  zh: {
+    'page.title': 'DeepSeek Harness — 运行环境安装',
+    'page.heading': 'DeepSeek Harness 桌面版 — 运行环境安装',
+    'page.sub': '第一次使用需要自动准备 Node.js 与 deepseek-harness 运行环境',
+    'steps.title': '安装步骤',
+    'steps.waitTitle': '等待开始',
+    'steps.waitSub': '点击「开始安装运行环境」',
+    'steps.waitSubError': '上次安装未完成,可直接重试(已完成的步骤会跳过)',
+    'steps.running': '进行中…',
+    'steps.stopped': '已中断,重试后从这里继续',
+    'steps.skipped': '已就绪,跳过',
+    'plan.title': '将安装',
+    'plan.loading': '读取中…',
+    'mode.label': '下载源:',
+    'mode.auto': '自动选择',
+    'mode.cn': '国内镜像(优先)',
+    'mode.direct': '直连官方源',
+    'modeHint.auto': '自动探测:国内可达则优先镜像,否则直连',
+    'modeHint.cn': 'Node/npm 走 npmmirror,GitHub 源码走加速代理',
+    'modeHint.direct': '全部走官方源(nodejs.org / GitHub / npmjs)',
+    'btn.start': '开始安装运行环境',
+    'btn.startRunning': '正在安装…(可随时关闭窗口,后台继续)',
+    'btn.startDone': '安装完成',
+    'btn.startRetry': '重试(续跑未完成步骤)',
+    'btn.startBootRetry': '重新启动服务',
+    'btn.pick': '选择已有仓库…',
+    'btn.quit': '退出',
+    'btn.quitRunning': '取消并退出',
+    'ok.done': '✅ 运行环境安装完成,正在启动 DeepSeek Harness…',
+    'boot.failedNote': '安装完成,但启动服务失败:',
+    'note.idle': '点击「开始安装」自动下载并安装运行环境',
+    'note.running': '正在安装…',
+    'note.failed': '安装失败,可重试或改用手动选择',
+    'note.autostart': '开始自动安装运行环境…',
+    'modeName.auto': '自动',
+    'modeName.cn': '国内镜像',
+    'modeName.direct': '直连',
+    'modeName.pack': '预构建运行包',
+    'stage.node': '安装 Node.js 运行时',
+    'stage.harness': '安装 deepseek-harness',
+    'stage.pnpm': '准备 pnpm',
+    'stage.deps': '安装依赖(pnpm install)',
+    'stage.build': '构建前端与库(pnpm run build)',
+    'stage.pack': '安装预构建运行包',
+    'log.title': '运行日志 ▾',
+    'log.muted': '运行日志 ▸',
+    'foot.dir': '安装目录:',
+    'foot.disk': '预计下载:Node ≈35 MB · 源码 ≈20–150 MB · 依赖 ≈1.4 GB;完成后占用磁盘 ≈3 GB。全程约 10–40 分钟(视网速),关闭窗口会在后台继续。',
+  },
+  en: {
+    'page.title': 'DeepSeek Harness — Runtime setup',
+    'page.heading': 'DeepSeek Harness Desktop — Runtime setup',
+    'page.sub': 'First run prepares the Node.js and deepseek-harness runtime automatically',
+    'steps.title': 'Steps',
+    'steps.waitTitle': 'Waiting to start',
+    'steps.waitSub': 'Click "Install runtime"',
+    'steps.waitSubError': 'A previous run did not finish — retry to resume (completed steps are skipped)',
+    'steps.running': 'Running…',
+    'steps.stopped': 'Interrupted — resumes from here on retry',
+    'steps.skipped': 'Ready, skipped',
+    'plan.title': 'Will install',
+    'plan.loading': 'Loading…',
+    'mode.label': 'Source:',
+    'mode.auto': 'Automatic',
+    'mode.cn': 'China mirrors (preferred)',
+    'mode.direct': 'Official sources',
+    'modeHint.auto': 'Probes the network: mirrors when reachable, otherwise direct',
+    'modeHint.cn': 'Node/npm via npmmirror; GitHub archives via proxies',
+    'modeHint.direct': 'Official sources only (nodejs.org / GitHub / npmjs)',
+    'btn.start': 'Install runtime',
+    'btn.startRunning': 'Installing… (you can close the window; it continues in the background)',
+    'btn.startDone': 'Installed',
+    'btn.startRetry': 'Retry (resume unfinished steps)',
+    'btn.startBootRetry': 'Restart service',
+    'btn.pick': 'Choose an existing checkout…',
+    'btn.quit': 'Quit',
+    'btn.quitRunning': 'Cancel and quit',
+    'ok.done': '✅ Runtime installed — starting DeepSeek Harness…',
+    'boot.failedNote': 'Install finished, but starting the service failed:',
+    'note.idle': 'Click "Install" to download and set up the runtime',
+    'note.running': 'Installing…',
+    'note.failed': 'Installation failed — retry or choose an existing checkout',
+    'note.autostart': 'Starting automatic runtime installation…',
+    'modeName.auto': 'auto',
+    'modeName.cn': 'CN mirrors',
+    'modeName.direct': 'direct',
+    'modeName.pack': 'prebuilt runtime pack',
+    'stage.node': 'Install Node.js runtime',
+    'stage.harness': 'Install deepseek-harness',
+    'stage.pnpm': 'Prepare pnpm',
+    'stage.deps': 'Install dependencies (pnpm install)',
+    'stage.build': 'Build libraries and web client (pnpm run build)',
+    'stage.pack': 'Install prebuilt runtime pack',
+    'log.title': 'Log ▾',
+    'log.muted': 'Log ▸',
+    'foot.dir': 'Install dir:',
+    'foot.disk': 'Downloads: Node ≈35 MB · source ≈20–150 MB · deps ≈1.4 GB; ≈3 GB disk after completion. Usually 10–40 min depending on network; closing the window continues in the background.',
+  },
+}
+let LANG = 'zh'
+const T = (key) => (DICTS[LANG] && DICTS[LANG][key]) || DICTS.zh[key] || key
+
+function applyStaticI18n() {
+  document.title = T('page.title')
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en'
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = T(el.getAttribute('data-i18n'))
+  })
+  $('diskNote').textContent = T('foot.disk')
+}
+
+const MODE_TEXT = { auto: 'modeName.auto', cn: 'modeName.cn', direct: 'modeName.direct', pack: 'modeName.pack' }
+const MODE_HINT = { auto: 'modeHint.auto', cn: 'modeHint.cn', direct: 'modeHint.direct' }
+const STAGE_KEYS = { node: 'stage.node', harness: 'stage.harness', pnpm: 'stage.pnpm', deps: 'stage.deps', build: 'stage.build', pack: 'stage.pack' }
+
+let snap = { running: false, done: false, error: null, note: '', stages: [], logs: [], planInfo: null, result: null }
+let bootError = false
+let meta = { runtimeDir: '', mirrorMode: 'auto', autoProvision: true, language: 'zh', node: '', pnpm: '', dshRef: '', currentRepo: '', currentNode: '' }
+
+function fmtSize(bytes, total) {
+  if (!bytes) return ''
+  const unit = (v) => {
+    if (!v) return '0 B'
+    const u = ['B', 'KB', 'MB', 'GB']
+    let i = 0
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+    return v.toFixed(v >= 100 || i === 0 ? 0 : 1) + ' ' + u[i]
+  }
+  return total ? unit(bytes) + ' / ' + unit(total) : unit(bytes)
+}
+
+function stageTitle(st) {
+  if (STAGE_KEYS[st.id]) return T(STAGE_KEYS[st.id])
+  return st.title || st.id
+}
+
+function renderSteps() {
+  const host = $('steps')
+  host.textContent = ''
+  const list = snap.stages && snap.stages.length ? snap.stages : null
+  if (!list) {
+    const row = document.createElement('div')
+    row.className = 'step'
+    const dot = document.createElement('div'); dot.className = 'dot'
+    const b = document.createElement('div'); b.className = 'body'
+    const t = document.createElement('div'); t.className = 't'; t.textContent = T('steps.waitTitle')
+    const s = document.createElement('div'); s.className = 's'; s.textContent = snap.error ? T('steps.waitSubError') : T('steps.waitSub')
+    b.append(t, s); row.append(dot, b); host.appendChild(row)
+    return
+  }
+  for (const st of list) {
+    let cls = 'step ' + st.status
+    if (st.status === 'running' && !snap.running) cls = 'step stopped'
+    const row = document.createElement('div'); row.className = cls
+    const dot = document.createElement('div'); dot.className = 'dot'
+    if (st.status === 'done') dot.textContent = '✓'
+    else if (st.status === 'error') dot.textContent = '✕'
+    const b = document.createElement('div'); b.className = 'body'
+    const t = document.createElement('div'); t.className = 't'; t.textContent = stageTitle(st)
+    const s = document.createElement('div'); s.className = 's'
+    const bits = []
+    if (st.status === 'running' && snap.running) bits.push(T('steps.running'))
+    if (st.status === 'running' && !snap.running) bits.push(T('steps.stopped'))
+    if (st.skipReason) bits.push(T('steps.skipped'))
+    if (st.note && (LANG === 'zh' || !STAGE_KEYS[st.id])) bits.push(st.note)
+    s.textContent = bits.join(' · ')
+    b.append(t, s); row.append(dot, b); host.appendChild(row)
+  }
+}
+
+function renderMetaCard() {
+  const box = $('meta')
+  box.textContent = ''
+  const ref = (snap.planInfo && snap.planInfo.dshRef) || meta.dshRef
+  const parts = []
+  if (ref) parts.push(['deepseek-harness ', ref, 'code'])
+  if (snap.planInfo) {
+    const modeLabel = MODE_TEXT[snap.planInfo.mode] ? T(MODE_TEXT[snap.planInfo.mode]) : snap.planInfo.mode
+    parts.push(['mode: ' + modeLabel + ' · registry: ', snap.planInfo.registry, 'code'])
+  }
+  if (meta.node) parts.push(['Node.js ' + meta.node + ' · pnpm ' + meta.pnpm, null, null])
+  if (meta.currentRepo) parts.push(['repo: ', meta.currentRepo, 'code'])
+  if (meta.currentNode) parts.push(['node: ', meta.currentNode, 'code'])
+  for (const [prefix, value, style] of parts) {
+    const d = document.createElement('div')
+    d.appendChild(document.createTextNode(prefix))
+    if (value != null) {
+      const c = document.createElement(style === 'code' ? 'code' : 'b')
+      c.textContent = value
+      d.appendChild(c)
+    }
+    box.appendChild(d)
+  }
+  if (!parts.length) box.textContent = T('plan.loading')
+}
+
+function refreshButtons() {
+  const running = !!snap.running
+  const done = !!snap.done && !bootError
+  const error = !!snap.error || bootError
+  const start = $('btnStart')
+  start.disabled = running || done
+  if (running) start.textContent = T('btn.startRunning')
+  else if (done) start.textContent = T('btn.startDone')
+  else if (error) start.textContent = bootError ? T('btn.startBootRetry') : T('btn.startRetry')
+  else start.textContent = T('btn.start')
+  $('btnPick').disabled = running
+  $('btnQuit').textContent = running ? T('btn.quitRunning') : T('btn.quit')
+  $('mode').disabled = running || done
+  $('okbox').style.display = done ? 'block' : 'none'
+  $('okbox').textContent = done ? T('ok.done') : ''
+  const errText = snap.error || (bootError || '')
+  $('errbox').style.display = errText ? 'block' : 'none'
+  $('errbox').textContent = errText || ''
+  $('note').textContent = snap.note || (done ? '' : (running ? T('note.running') : (errText ? T('note.failed') : T('note.idle'))))
+  $('note').className = running ? 'running' : ''
+  if (snap.planInfo || meta.node) renderMetaCard()
+}
+
+function renderLogs() {
+  if (!snap.logs || !snap.logs.length) return
+  const pre = $('log')
+  pre.textContent = snap.logs.join('\n')
+  pre.scrollTop = pre.scrollHeight
+  $('logbox').style.display = 'flex'
+}
+
+function applySnapshot(next) {
+  snap = next || snap
+  bootError = false
+  renderSteps()
+  refreshButtons()
+  renderLogs()
+}
+
+function appendLogLine(text) {
+  if (!snap.logs) snap.logs = []
+  snap.logs.push(String(text))
+  if (snap.logs.length > 600) snap.logs = snap.logs.slice(-600)
+  renderLogs()
+}
+
+async function handleEvent(evt) {
+  if (!evt) return
+  switch (evt.type) {
+    case 'log': appendLogLine(evt.text); break
+    case 'boot-error':
+      bootError = true
+      $('note').textContent = T('boot.failedNote') + (evt.message || '')
+      refreshButtons()
+      break
+    case 'note':
+      snap.note = evt.text || ''
+      $('note').textContent = snap.note
+      $('note').className = snap.running ? 'running' : ''
+      break
+    case 'progress': {
+      $('pbar').style.display = 'block'
+      const pct = evt.total ? Math.min(100, (evt.bytes / evt.total) * 100) : 0
+      $('pfill').style.width = pct.toFixed(1) + '%'
+      $('pmeta').textContent = (evt.label || '') + ': ' + fmtSize(evt.bytes, evt.total)
+      break
+    }
+    case 'stage':
+    case 'start':
+    case 'plan':
+    case 'error':
+    case 'cancelled':
+    case 'done':
+    case 'state':
+    default:
+      applySnapshot(await __dshProvision.getState())
+      if (evt.type === 'done') $('pbar').style.display = 'none'
+      break
+  }
+}
+
+async function boot() {
+  try {
+    meta = await __dshProvision.getMeta()
+    if (meta.language === 'en' || meta.language === 'zh') LANG = meta.language
+    applyStaticI18n()
+    $('runtimeDir').textContent = meta.runtimeDir
+    $('mode').value = meta.mirrorMode || 'auto'
+    $('modeHint').textContent = T(MODE_HINT[$('mode').value] || '') || ''
+    __dshProvision.onEvent(handleEvent)
+    applySnapshot(await __dshProvision.getState())
+    renderMetaCard()
+    const untouched = !(snap.stages && snap.stages.length) && !snap.cancelled
+    if (!snap.running && !snap.done && !snap.error && untouched && meta.autoProvision) {
+      snap.note = T('note.autostart')
+      $('note').textContent = snap.note
+      __dshProvision.start()
+    }
+  } catch (err) {
+    $('note').textContent = 'init failed: ' + String(err)
+    $('errbox').style.display = 'block'
+    $('errbox').textContent = String(err)
+  }
+}
+
+$('btnStart').addEventListener('click', () => __dshProvision.start())
+$('btnPick').addEventListener('click', () => __dshProvision.chooseRepo())
+$('btnQuit').addEventListener('click', () => __dshProvision.quit())
+$('mode').addEventListener('change', async (e) => {
+  $('modeHint').textContent = T(MODE_HINT[e.target.value] || '') || ''
+  const applied = await __dshProvision.setMirrorMode(e.target.value)
+  $('mode').value = applied || e.target.value
+})
+$('logToggle').addEventListener('click', () => {
+  const pre = $('log')
+  const hidden = pre.style.display === 'none'
+  pre.style.display = hidden ? 'block' : 'none'
+  $('logToggle').textContent = (LANG === 'zh' ? '运行日志' : 'Log') + ' ' + (hidden ? '▾' : '▸')
+})
+$('logToggle').click()
+
+boot()
+</script>
+</body>
+</html>

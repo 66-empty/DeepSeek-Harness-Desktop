@@ -1,0 +1,624 @@
+﻿diff --git a/packages/client/ui-settings-general/README.md b/packages/client/ui-settings-general/README.md
+index 702f53f99f..3db3ccdbde 100644
+--- a/packages/client/ui-settings-general/README.md
++++ b/packages/client/ui-settings-general/README.md
+@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
+ 
+ ## Summary
+ 
+-`dsh-client-ui-settings-general` is the settings shell of the dsh web client: the Settings panel opens from the sidebar's bottom control, a connection-failure indicator beside that control offers immediate recovery, the navigation is built from the sections features contribute, and first-run users are walked through one onboarding step at a time. It also registers everything on the Settings pages that belongs to no single feature: the trigger/header/close chrome content, the local configuration-file action, the General section and its `settings.general.item` slot, and the `settings` dictionaries. Feature-owned rows (Permission, Language, Appearance), sections (Models), and conditional onboarding steps stay with their feature packages; the shell itself ships no onboarding copy of its own.
++`dsh-client-ui-settings-general` is the settings shell of the dsh web client: the Settings panel opens from the sidebar's bottom control, a connection-failure indicator beside that control offers immediate recovery, the navigation is built from the sections features contribute, and first-run users are walked through one onboarding step at a time. It also registers everything on the Settings pages that belongs to no single feature: the trigger/header/close chrome content, the local configuration-file action, the General section and its `settings.general.item` slot, and the `settings` dictionaries. Feature-owned rows (Permission, Language, Appearance), sections (Models), and conditional onboarding steps stay with their feature packages; the shell itself ships no onboarding copy of its own. The start-at-login row is the one built-in General row: it registers only while the page runs inside the desktop shell (the shell's preload bridge is present), so plain browsers keep an empty row ledger.
+ 
+ ## Table of Contents
+ 
+@@ -29,7 +29,7 @@ Users reach the shell through the sidebar's bottom Settings control; feature plu
+ 
+ ### The General section
+ 
+-The General section holds rows registered into `settings.general.item` by feature packages — it has no built-in rows. Feature plugins own the row copy and behavior; the shell only provides the section and its slot. The Appearance row, for example, lives in ui-theme.
++The General section holds rows registered into `settings.general.item` by feature packages — feature plugins own the row copy and behavior; the shell only provides the section and its slot. The Appearance row, for example, lives in ui-theme. The single exception is the start-at-login row: when the page runs inside the desktop shell, this package registers a **Start at login** switch that reads and writes the shell's login-item registration through the `window.__dshDesktopShell` preload bridge; without the bridge (any plain browser) no row registers.
+ 
+ ### Opening the configuration file
+ 
+@@ -98,7 +98,7 @@ None; this package neither assembles nor sends a provider request.
+ 
+ These limits define what the shell itself provides versus what features must supply; they are current package constraints.
+ 
+-- **The General section has no built-in rows** — each row appears only when its owning feature plugin is mounted; the shell cannot fill the section alone.
++- **General rows are feature- or environment-owned** — every row appears only when its owning feature plugin is mounted, and the desktop-shell start-at-login row only when that shell's preload bridge is present; the shell cannot fill the section alone.
+ 
+ <a id="dev-note"></a>
+ ### Dev Note
+diff --git a/packages/client/ui-settings-general/README.zh.md b/packages/client/ui-settings-general/README.zh.md
+index ca70126089..fe3fa7a6c0 100644
+--- a/packages/client/ui-settings-general/README.zh.md
++++ b/packages/client/ui-settings-general/README.zh.md
+@@ -9,7 +9,7 @@ kind: "package-reference"
+ 
+ ## 概述
+ 
+-`dsh-client-ui-settings-general` 是 dsh Web 客户端的设置外壳：Settings 面板从侧边栏底部的控件打开，该控件旁的连接故障指示器提供即时恢复操作；导航由各功能贡献的分区构建；首次运行的用户一次只走一个引导步骤。它还注册设置页面上所有不属于单一功能的内容：触发器、标题栏与关闭控件界面框架、「本地配置文件」操作、「通用」分区及其 `settings.general.item` slot，以及 `settings` 字典。归具体功能所有的行（「权限」、「语言」、「外观」）、分区（「模型」）与条件式首次使用引导步骤仍由各自的功能包提供；外壳本身不自带任何引导文案。
++`dsh-client-ui-settings-general` 是 dsh Web 客户端的设置外壳：Settings 面板从侧边栏底部的控件打开，该控件旁的连接故障指示器提供即时恢复操作；导航由各功能贡献的分区构建；首次运行的用户一次只走一个引导步骤。它还注册设置页面上所有不属于单一功能的内容：触发器、标题栏与关闭控件界面框架、「本地配置文件」操作、「通用」分区及其 `settings.general.item` slot，以及 `settings` 字典。归具体功能所有的行（「权限」、「语言」、「外观」）、分区（「模型」）与条件式首次使用引导步骤仍由各自的功能包提供；外壳本身不自带任何引导文案。「开机自启」行是唯一的内置通用行：仅当页面运行在桌面外壳内（存在该外壳的 preload 桥接）时注册，因此普通浏览器中的行账本保持为空。
+ 
+ ## 目录
+ 
+@@ -29,7 +29,7 @@ kind: "package-reference"
+ 
+ ### 「通用」分区
+ 
+-「通用」分区承载由功能包注册进 `settings.general.item` 的行——它没有内置行。功能插件拥有行文案与行为；外壳只提供分区及其 slot。例如「外观」行位于 ui-theme。
++「通用」分区承载由功能包注册进 `settings.general.item` 的行——功能插件拥有行文案与行为；外壳只提供分区及其 slot。例如「外观」行位于 ui-theme。唯一例外是「开机自启」行：当页面运行在桌面外壳内时，本包注册一个**开机自启**开关，通过 `window.__dshDesktopShell` preload 桥接读取并写入外壳的登录自启注册；没有桥接（任何普通浏览器）时不注册任何行。
+ 
+ ### 打开配置文件
+ 
+@@ -98,7 +98,7 @@ kind: "package-reference"
+ 
+ 这些限制说明外壳自身提供什么、功能包必须提供什么；它们是当前包约束。
+ 
+-- **「通用」分区没有内置行**：每一行仅在其所属功能插件挂载时出现；外壳单独无法填满该分区。
++- **「通用」行由功能或运行环境持有**：每一行仅在其所属功能插件挂载时出现，桌面外壳的「开机自启」行仅在该外壳的 preload 桥接存在时出现；外壳单独无法填满该分区。
+ 
+ <a id="dev-note"></a>
+ ### 开发备注
+diff --git a/packages/client/ui-settings-general/src/client/AutoStartRow.module.css b/packages/client/ui-settings-general/src/client/AutoStartRow.module.css
+new file mode 100644
+index 0000000000..28ddb7983d
+--- /dev/null
++++ b/packages/client/ui-settings-general/src/client/AutoStartRow.module.css
+@@ -0,0 +1,78 @@
++/* Desktop start-at-login row: title/description plus an on/off switch. */
++
++.row {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  padding: 16px 0;
++  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
++}
++
++.rowText {
++  flex: 1;
++  min-width: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++  padding-right: 48px;
++}
++
++.title {
++  font-size: 14px;
++  font-weight: 400;
++  line-height: 22px;
++  color: var(--dsw-alias-label-primary);
++}
++
++.desc {
++  font-size: 12px;
++  font-weight: 400;
++  line-height: 18px;
++  color: var(--dsw-alias-label-tertiary);
++}
++
++.error {
++  font-size: 12px;
++  line-height: 18px;
++  color: var(--dsw-alias-label-error);
++}
++
++.switch {
++  box-sizing: border-box;
++  position: relative;
++  flex: none;
++  width: 36px;
++  height: 20px;
++  padding: 2px;
++  border: 0;
++  border-radius: 10px;
++  background: var(--dsw-alias-border-l3);
++  cursor: pointer;
++}
++
++.switchOn {
++  background: var(--dsw-alias-brand-primary);
++}
++
++.switch:disabled {
++  cursor: default;
++  opacity: 0.5;
++}
++
++.switch:focus-visible {
++  outline: 2px solid var(--dsw-alias-brand-primary);
++  outline-offset: 2px;
++}
++
++.thumb {
++  display: block;
++  width: 16px;
++  height: 16px;
++  border-radius: 50%;
++  background: var(--dsw-alias-label-primary-foreground);
++  transition: transform 120ms ease;
++}
++
++.switchOn .thumb {
++  transform: translateX(16px);
++}
+diff --git a/packages/client/ui-settings-general/src/client/AutoStartRow.tsx b/packages/client/ui-settings-general/src/client/AutoStartRow.tsx
+new file mode 100644
+index 0000000000..833d6e0a4d
+--- /dev/null
++++ b/packages/client/ui-settings-general/src/client/AutoStartRow.tsx
+@@ -0,0 +1,59 @@
++/** General Settings row for starting the desktop app at login (desktop shell only). */
++
++import { useEffect } from 'react'
++import type { ReactNode } from 'react'
++import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
++import type { DesktopAutostartController } from './auto-start-controller.ts'
++import css from './AutoStartRow.module.css'
++
++/** Registrant-owned dependencies of {@link AutoStartRow}. */
++export interface AutoStartRowInjected {
++  /** Registration state owner and bridge caller. */
++  controller: DesktopAutostartController
++  hooks: {
++    /** Controller snapshot bound by the UI renderer as useSnapshot. */
++    snapshot: DesktopAutostartController['store']
++  }
++}
++
++/** General-item owner share, localized copy, and the registrant's state face. */
++export type AutoStartRowProps =
++  PropsRuntime<'settings.general.item'> & PropsLocale<'settings'> & InjectFace<AutoStartRowInjected>
++
++/**
++ * Render the start-at-login switch. The row exists only while the page runs
++ * inside the desktop shell (the register branch in apply), so the shell's
++ * bridge is always present here.
++ * @param props - composed slot props.
++ * @returns the preference row.
++ */
++export function AutoStartRow({ controller, useSnapshot, t }: AutoStartRowProps): ReactNode {
++  const state = useSnapshot(snapshot => snapshot)
++
++  useEffect(() => {
++    void controller.load()
++  }, [controller])
++
++  const inert = state.status !== 'ready' || state.saving
++
++  return (
++    <div className={css.row}>
++      <div className={css.rowText}>
++        <div className={css.title}>{t('autoStart.title')}</div>
++        <div className={css.desc}>{t('autoStart.description')}</div>
++        {state.error ? <div className={css.error} role="alert">{t('autoStart.error')}</div> : null}
++      </div>
++      <button
++        type="button"
++        role="switch"
++        aria-checked={state.enabled}
++        aria-label={t('autoStart.title')}
++        className={state.enabled ? `${css.switch} ${css.switchOn}` : css.switch}
++        disabled={inert}
++        onClick={() => { void controller.setEnabled(!state.enabled) }}
++      >
++        <span className={css.thumb} />
++      </button>
++    </div>
++  )
++}
+diff --git a/packages/client/ui-settings-general/src/client/auto-start-controller.ts b/packages/client/ui-settings-general/src/client/auto-start-controller.ts
+new file mode 100644
+index 0000000000..98f049a9c8
+--- /dev/null
++++ b/packages/client/ui-settings-general/src/client/auto-start-controller.ts
+@@ -0,0 +1,83 @@
++/** State owner for the desktop-shell start-at-login row. */
++
++import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
++import type { DesktopShellBridge } from './desktop-shell-bridge.ts'
++
++/** Browser state of the host desktop shell's start-at-login registration. */
++export interface AutoStartState {
++  /** Bridge read phase; the switch stays inert until the first read lands. */
++  status: 'loading' | 'ready'
++  /** Whether start-at-login is currently registered on the host. */
++  enabled: boolean
++  /** Whether one registration write is in flight. */
++  saving: boolean
++  /** Whether the last bridge call failed; the UI renders only localized copy. */
++  error: boolean
++}
++
++/**
++ * Reads and writes the desktop shell's start-at-login registration through
++ * the preload bridge; the switch is inert until the first read settles.
++ */
++export class DesktopAutostartController {
++  /** uSES-safe state source shared by the registered row. */
++  readonly store: SnapshotStore<AutoStartState> = createSnapshotStore({
++    status: 'loading', enabled: false, saving: false, error: false,
++  })
++
++  /**
++   * @param bridge - the preload bridge installed by the desktop shell.
++   */
++  constructor(private readonly bridge: DesktopShellBridge) {}
++
++  /**
++   * Read the current registration once; failures surface as a localized error
++   * with the switch disabled rather than an unhandled rejection.
++   * @returns after the bridge read settles.
++   */
++  async load(): Promise<void> {
++    try {
++      const enabled = await this.bridge.getAutoStart()
++      this.store.update((state) => {
++        state.status = 'ready'
++        state.enabled = enabled
++        state.error = false
++      })
++    } catch {
++      this.store.update((state) => {
++        state.status = 'ready'
++        state.enabled = false
++        state.error = true
++      })
++    }
++  }
++
++  /**
++   * Apply one registration change; concurrent gestures collapse behind the
++   * in-flight write, and a failed write keeps the last applied value.
++   * @param enabled - the registration state to apply.
++   * @returns after the bridge write settles.
++   */
++  async setEnabled(enabled: boolean): Promise<void> {
++    const current = this.store.getSnapshot()
++    if (current.status !== 'ready' || current.saving) return
++    this.store.update((state) => {
++      state.saving = true
++      state.error = false
++    })
++    try {
++      const applied = await this.bridge.setAutoStart(enabled)
++      this.store.update((state) => {
++        state.enabled = applied
++      })
++    } catch {
++      this.store.update((state) => {
++        state.error = true
++      })
++    } finally {
++      this.store.update((state) => {
++        state.saving = false
++      })
++    }
++  }
++}
+diff --git a/packages/client/ui-settings-general/src/client/desktop-shell-bridge.ts b/packages/client/ui-settings-general/src/client/desktop-shell-bridge.ts
+new file mode 100644
+index 0000000000..e29ef76168
+--- /dev/null
++++ b/packages/client/ui-settings-general/src/client/desktop-shell-bridge.ts
+@@ -0,0 +1,28 @@
++/**
++ * Desktop-shell bridge contract: the API the Electron wrapper's preload
++ * exposes as `window.__dshDesktopShell`. Absent in every plain browser, so
++ * rows that depend on it register only when the page runs inside the shell.
++ */
++
++/** Start-at-login control provided by the host desktop shell. */
++export interface DesktopShellBridge {
++  /** Whether the desktop app is registered to start when the user signs in. */
++  getAutoStart(): Promise<boolean>
++  /** Register or unregister start-at-login; resolves with the applied state. */
++  setAutoStart(enabled: boolean): Promise<boolean>
++}
++
++declare global {
++  interface Window {
++    /** Installed by the DeepSeek Harness Desktop preload; absent otherwise. */
++    __dshDesktopShell?: DesktopShellBridge
++  }
++}
++
++/**
++ * Read the bridge installed by the desktop shell, if the page runs inside one.
++ * @returns the shell bridge, or undefined in a plain browser or Node.
++ */
++export function readDesktopShellBridge(): DesktopShellBridge | undefined {
++  return typeof window === 'undefined' ? undefined : window.__dshDesktopShell
++}
+diff --git a/packages/client/ui-settings-general/src/client/index.ts b/packages/client/ui-settings-general/src/client/index.ts
+index c8962ec009..40d8b64287 100644
+--- a/packages/client/ui-settings-general/src/client/index.ts
++++ b/packages/client/ui-settings-general/src/client/index.ts
+@@ -28,6 +28,10 @@ import { CloseLabel, HeaderContent, TriggerContent } from './chrome.tsx'
+ import { GeneralSection } from './GeneralSection.tsx'
+ import { SettingsDocumentAction } from './SettingsDocumentAction.tsx'
+ import type { SettingsDocumentActionInjected } from './SettingsDocumentAction.tsx'
++import { AutoStartRow } from './AutoStartRow.tsx'
++import type { AutoStartRowInjected } from './AutoStartRow.tsx'
++import { DesktopAutostartController } from './auto-start-controller.ts'
++import { readDesktopShellBridge } from './desktop-shell-bridge.ts'
+ import { SettingsDocumentStore } from './settings-document-store.ts'
+ import { en, zh, type SettingsKey } from './locales.ts'
+ 
+@@ -180,4 +184,23 @@ export function apply(ctx: ClientContext): void {
+     locale: NS,
+     children: { 'settings.general.item': { kind: 'list', scope: 'root' } },
+   }, GeneralSection))
++
++  // The start-at-login row exists only inside the desktop shell: it registers
++  // while the preload bridge is present, so plain browsers keep an empty row
++  // ledger exactly as before.
++  const desktopShellBridge = readDesktopShellBridge()
++  if (desktopShellBridge !== undefined) {
++    const autostartController = new DesktopAutostartController(desktopShellBridge)
++    const autoStartInjected = (): AutoStartRowInjected => ({
++      controller: autostartController,
++      hooks: { snapshot: autostartController.store },
++    })
++    ctx.slots.inject('settings.general.item', () => ctx.slots.register({
++      name: 'settings.general.item',
++      id: 'auto-start',
++      order: 10,
++      locale: NS,
++      inject: autoStartInjected,
++    }, AutoStartRow))
++  }
+ }
+diff --git a/packages/client/ui-settings-general/src/client/locales.ts b/packages/client/ui-settings-general/src/client/locales.ts
+index c40d7f78af..0a3a6d8cb0 100644
+--- a/packages/client/ui-settings-general/src/client/locales.ts
++++ b/packages/client/ui-settings-general/src/client/locales.ts
+@@ -8,6 +8,9 @@ export const zh = {
+   'openDocument': '打开配置文件',
+   'openDocument.error': '无法打开配置文件',
+   'general.nav': '通用设置',
++  'autoStart.title': '开机自启',
++  'autoStart.description': '登录系统后自动在后台启动 DeepSeek Harness,并驻留系统托盘',
++  'autoStart.error': '无法修改开机自启设置',
+   'connection.error': '连接异常',
+   'connection.retry': '立即重连',
+   'connection.connecting': '连接中',
+@@ -27,6 +30,9 @@ export const en = {
+   'openDocument': 'Open configuration file',
+   'openDocument.error': 'Could not open configuration file',
+   'general.nav': 'General',
++  'autoStart.title': 'Start at login',
++  'autoStart.description': 'Launch DeepSeek Harness in the background and keep it in the system tray after you sign in',
++  'autoStart.error': 'Could not update the start-at-login setting',
+   'connection.error': 'Disconnected',
+   'connection.retry': 'Reconnect now',
+   'connection.connecting': 'Connecting',
+diff --git a/packages/client/ui-settings-general/tests/apply.client.spec.ts b/packages/client/ui-settings-general/tests/apply.client.spec.ts
+index 8a0c742e43..a9f312bcf9 100644
+--- a/packages/client/ui-settings-general/tests/apply.client.spec.ts
++++ b/packages/client/ui-settings-general/tests/apply.client.spec.ts
+@@ -11,6 +11,8 @@ import { CloseLabel, HeaderContent, TriggerContent } from '../src/client/chrome.
+ import { GeneralSection } from '../src/client/GeneralSection.tsx'
+ import { SettingsDocumentAction } from '../src/client/SettingsDocumentAction.tsx'
+ import type { SettingsDocumentActionInjected } from '../src/client/SettingsDocumentAction.tsx'
++import { AutoStartRow } from '../src/client/AutoStartRow.tsx'
++import type { AutoStartRowInjected } from '../src/client/AutoStartRow.tsx'
+ 
+ // These specs assert the shipped Chinese copy. The lane has no jsdom `window`,
+ // so browser-language detection never runs and a fresh LocaleRuntime opens on
+@@ -215,4 +217,35 @@ describe('ui-settings-general apply', () => {
+     for (const [name] of SEATS) expect(b.slots.entries(name)).toHaveLength(0)
+     expect(b.slots.spec('settings.general.item')).toBeUndefined()
+   })
++
++  it('registers the start-at-login row only while the desktop shell bridge is present', async () => {
++    const getAutoStart = vi.fn(async () => true)
++    const setAutoStart = vi.fn(async (enabled: boolean) => enabled)
++    const holder = globalThis as { window?: unknown }
++    const previous = holder.window
++    holder.window = { __dshDesktopShell: { getAutoStart, setAutoStart } }
++    try {
++      const b = await bench()
++      declare(b.slots)
++      await b.ctx.plugin({ inject: [...inject], apply }).await()
++      const row = b.slots.entries('settings.general.item')[0]!
++      expect(row.component).toBe(AutoStartRow)
++      expect(row.options).toMatchObject({ id: 'auto-start', order: 10 })
++      expect(row.locale).toBe('settings')
++      const injected = (row.inject as unknown as () => AutoStartRowInjected)()
++      expect(injected.controller.store.getSnapshot()).toEqual({
++        status: 'loading', enabled: false, saving: false, error: false,
++      })
++      expect(injected.hooks.snapshot).toBe(injected.controller.store)
++      await injected.controller.load()
++      expect(getAutoStart).toHaveBeenCalledOnce()
++      expect(injected.controller.store.getSnapshot()).toMatchObject({ status: 'ready', enabled: true })
++      await injected.controller.setEnabled(false)
++      expect(setAutoStart).toHaveBeenCalledWith(false)
++      expect(injected.controller.store.getSnapshot()).toMatchObject({ enabled: false })
++    } finally {
++      if (previous === undefined) delete holder.window
++      else holder.window = previous
++    }
++  })
+ })
+diff --git a/packages/client/ui-settings-general/tests/auto-start-controller.client.spec.ts b/packages/client/ui-settings-general/tests/auto-start-controller.client.spec.ts
+new file mode 100644
+index 0000000000..e2b3d6cf61
+--- /dev/null
++++ b/packages/client/ui-settings-general/tests/auto-start-controller.client.spec.ts
+@@ -0,0 +1,74 @@
++/** DesktopAutostartController behavior: bridge reads/writes, failure and concurrency guards. */
++import { describe, expect, it, vi } from 'vitest'
++import type { DesktopShellBridge } from '../src/client/desktop-shell-bridge.ts'
++import { DesktopAutostartController } from '../src/client/auto-start-controller.ts'
++
++function bridge(overrides: Partial<DesktopShellBridge> = {}): DesktopShellBridge {
++  return {
++    getAutoStart: vi.fn(async () => false),
++    setAutoStart: vi.fn(async (enabled: boolean) => enabled),
++    ...overrides,
++  }
++}
++
++describe('DesktopAutostartController', () => {
++  it('loads the current registration into a ready snapshot', async () => {
++    const shell = bridge({ getAutoStart: vi.fn(async () => true) })
++    const controller = new DesktopAutostartController(shell)
++    expect(controller.store.getSnapshot()).toEqual({
++      status: 'loading', enabled: false, saving: false, error: false,
++    })
++    await controller.load()
++    expect(shell.getAutoStart).toHaveBeenCalledOnce()
++    expect(controller.store.getSnapshot()).toEqual({
++      status: 'ready', enabled: true, saving: false, error: false,
++    })
++  })
++
++  it('keeps the row inert and reports a read failure as a localized error', async () => {
++    const shell = bridge({ getAutoStart: vi.fn(async () => { throw new Error('bridge missing') }) })
++    const controller = new DesktopAutostartController(shell)
++    await controller.load()
++    expect(controller.store.getSnapshot()).toEqual({
++      status: 'ready', enabled: false, saving: false, error: true,
++    })
++  })
++
++  it('applies a write and reflects the state the bridge reports', async () => {
++    const shell = bridge()
++    const controller = new DesktopAutostartController(shell)
++    await controller.load()
++    const pending = controller.setEnabled(true)
++    expect(controller.store.getSnapshot()).toMatchObject({ saving: true, error: false })
++    await pending
++    expect(shell.setAutoStart).toHaveBeenCalledWith(true)
++    expect(controller.store.getSnapshot()).toMatchObject({ enabled: true, saving: false })
++  })
++
++  it('collapses concurrent writes behind the in-flight one', async () => {
++    const shell = bridge({ setAutoStart: vi.fn(async (enabled: boolean) => enabled) })
++    const controller = new DesktopAutostartController(shell)
++    await controller.load()
++    const first = controller.setEnabled(true)
++    // A second gesture while saving must be a no-op.
++    await controller.setEnabled(false)
++    expect(shell.setAutoStart).toHaveBeenCalledOnce()
++    await first
++    expect(controller.store.getSnapshot().enabled).toBe(true)
++  })
++
++  it('keeps the applied value and reports a failed write', async () => {
++    const shell = bridge({ setAutoStart: vi.fn(async () => { throw new Error('denied') }) })
++    const controller = new DesktopAutostartController(shell)
++    await controller.load()
++    await controller.setEnabled(true)
++    expect(controller.store.getSnapshot()).toMatchObject({ enabled: false, saving: false, error: true })
++  })
++
++  it('ignores writes before the first read settles', async () => {
++    const shell = bridge()
++    const controller = new DesktopAutostartController(shell)
++    await controller.setEnabled(true)
++    expect(shell.setAutoStart).not.toHaveBeenCalled()
++  })
++})
+diff --git a/packages/client/ui-settings-general/tests/auto-start-row.client.spec.tsx b/packages/client/ui-settings-general/tests/auto-start-row.client.spec.tsx
+new file mode 100644
+index 0000000000..3d589851ff
+--- /dev/null
++++ b/packages/client/ui-settings-general/tests/auto-start-row.client.spec.tsx
+@@ -0,0 +1,92 @@
++// @vitest-environment jsdom
++import { afterEach, describe, expect, it, vi } from 'vitest'
++import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
++import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
++import type { AutoStartRowProps } from '../src/client/AutoStartRow.tsx'
++import { AutoStartRow } from '../src/client/AutoStartRow.tsx'
++import { DesktopAutostartController } from '../src/client/auto-start-controller.ts'
++import { en } from '../src/client/locales.ts'
++
++afterEach(cleanup)
++
++// The seat's key domain is settings ∪ common; the stub answers from the
++// package dictionary and falls back to the key like the real chain.
++const t: AutoStartRowProps['t'] = key => (en as Record<string, string>)[key] ?? key
++
++// Global standard kit stubs: the item seat's owner share is empty and the
++// row consumes none of these hooks.
++const unusedHook = (() => { throw new Error('unused by AutoStartRow') }) as never
++type AttentionSnapshot = Parameters<Parameters<AutoStartRowProps['useSessionPendingInteraction']>[0]>[0]
++const noAttention: AttentionSnapshot = new Map()
++const useSessionPendingInteraction: AutoStartRowProps['useSessionPendingInteraction'] = selector => selector(noAttention)
++const kit = { useSessions: unusedHook, useSessionPendingInteraction, useWorkspaces: unusedHook }
++
++function mount(controller: DesktopAutostartController) {
++  return render(<AutoStartRow
++    {...kit}
++    t={t}
++    controller={controller}
++    useSnapshot={bindSnapshotSelector(controller.store)}
++  />)
++}
++
++describe('AutoStartRow', () => {
++  it('renders an inert switch until the registration read lands, then the applied state', async () => {
++    const controller = new DesktopAutostartController({
++      getAutoStart: vi.fn(async () => true),
++      setAutoStart: vi.fn(async (enabled: boolean) => enabled),
++    })
++    mount(controller)
++    const before = screen.getByRole('switch', { name: 'Start at login' })
++    expect(before.getAttribute('aria-checked')).toBe('false')
++    expect((before as HTMLButtonElement).disabled).toBe(true)
++    await waitFor(() => { expect(controller.store.getSnapshot().status).toBe('ready') })
++    const after = screen.getByRole('switch', { name: 'Start at login' })
++    expect(after.getAttribute('aria-checked')).toBe('true')
++    expect((after as HTMLButtonElement).disabled).toBe(false)
++    expect(screen.getByText('Start at login')).toBeTruthy()
++    expect(screen.getByText(/Launch DeepSeek Harness in the background/)).toBeTruthy()
++  })
++
++  it('writes the opposite state on click and disables while the write is in flight', async () => {
++    let resolveWrite: ((enabled: boolean) => void) | undefined
++    const setAutoStart = vi.fn(() => new Promise<boolean>((resolve) => { resolveWrite = resolve }))
++    const controller = new DesktopAutostartController({
++      getAutoStart: vi.fn(async () => true),
++      setAutoStart,
++    })
++    mount(controller)
++    await waitFor(() => { expect(controller.store.getSnapshot().status).toBe('ready') })
++    const toggle = screen.getByRole('switch', { name: 'Start at login' })
++    fireEvent.click(toggle)
++    expect(setAutoStart).toHaveBeenCalledWith(false)
++    expect((screen.getByRole('switch', { name: 'Start at login' }) as HTMLButtonElement).disabled).toBe(true)
++    resolveWrite!(false)
++    await waitFor(() => {
++      expect(controller.store.getSnapshot().enabled).toBe(false)
++    })
++    expect((screen.getByRole('switch', { name: 'Start at login' }) as HTMLButtonElement).disabled).toBe(false)
++  })
++
++  it('keeps the last applied value and shows a localized error when the write fails', async () => {
++    const controller = new DesktopAutostartController({
++      getAutoStart: vi.fn(async () => true),
++      setAutoStart: vi.fn(async () => { throw new Error('denied') }),
++    })
++    mount(controller)
++    await waitFor(() => { expect(controller.store.getSnapshot().status).toBe('ready') })
++    fireEvent.click(screen.getByRole('switch', { name: 'Start at login' }))
++    expect((await screen.findByRole('alert')).textContent).toBe('Could not update the start-at-login setting')
++    expect(screen.getByRole('switch', { name: 'Start at login' }).getAttribute('aria-checked')).toBe('true')
++  })
++
++  it('shows the localized error when the registration read fails', async () => {
++    const controller = new DesktopAutostartController({
++      getAutoStart: vi.fn(async () => { throw new Error('bridge missing') }),
++      setAutoStart: vi.fn(async (enabled: boolean) => enabled),
++    })
++    mount(controller)
++    expect((await screen.findByRole('alert')).textContent).toBe('Could not update the start-at-login setting')
++    expect((screen.getByRole('switch', { name: 'Start at login' }) as HTMLButtonElement).disabled).toBe(false)
++  })
++})
