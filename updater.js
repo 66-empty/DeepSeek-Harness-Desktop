@@ -47,6 +47,13 @@ const PORTABLE_ASSET_RE = /^DeepSeek-Harness-Desktop-Portable-.+\.exe$/iu
 /** Release notes are only shown in a small window; keep them bounded. */
 const MAX_NOTES_CHARS = 4000
 const API_TIMEOUT_MS = 15_000
+/**
+ * A 110 MB installer over a flaky route (CN networks cut GitHub/CDN transfers)
+ * rarely survives one pass through the source list. Every attempt resumes from
+ * the partial file, so retrying the list is what ultimately completes it.
+ */
+const MAX_DOWNLOAD_ATTEMPTS = 4
+const RETRY_BASE_DELAY_MS = 2_000
 
 /* ------------------------------------------------------------- errors */
 
@@ -326,8 +333,29 @@ function repoTagsUrl(repo) {
   return `https://github.com/${repo}/releases`
 }
 
+/** Sleep that can be interrupted by the download's cancellation token. */
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (signal && signal.cancelled) reject(new CancelledError())
+      else resolve()
+    }, ms)
+    if (timer.unref) timer.unref()
+  })
+}
+
+/** True for errors worth another pass (everything but cancel and sha mismatch). */
+function isRetryable(error) {
+  if (error instanceof CancelledError || (error && error.name === 'CancelledError')) return false
+  const code = error && error.code
+  return code !== 'sha' && code !== 'cancelled'
+}
+
 /**
  * Download (or reuse) an installer asset and verify it.
+ *
+ * Network failures retry the whole source list (resuming from the partial
+ * file); checksum mismatches and user cancellation stop immediately.
  *
  * @param {object} opts
  * @param {object} opts.asset - from {@link checkForUpdate}.
@@ -337,9 +365,10 @@ function repoTagsUrl(repo) {
  * @param {string} [opts.tmpDir] - defaults to `destDir`.
  * @param {object} [opts.signal] - `{ cancelled }` token.
  * @param {(received:number,total:number)=>void} [opts.onProgress]
+ * @param {(info:{attempt:number,attempts:number,message:string})=>void} [opts.onRetry]
  * @param {(line:string)=>void} [opts.log]
  * @param {boolean} [opts.force] - re-download even when the file looks cached.
- * @returns {Promise<{file:string,bytes:number,sha256:string|null,cached:boolean}>}
+ * @returns {Promise<{file:string,bytes:number,sha256:string|null,cached:boolean,attempts:number}>}
  */
 async function downloadUpdate(opts) {
   const options = opts || {}
@@ -359,7 +388,7 @@ async function downloadUpdate(opts) {
     const sizeOk = !asset.size || size === asset.size
     if (sizeOk && (!expected || sha256File(dest) === expected)) {
       if (options.log) options.log(`reusing verified download ${dest}`)
-      return { file: dest, bytes: size, sha256: expected, cached: true }
+      return { file: dest, bytes: size, sha256: expected, cached: true, attempts: 0 }
     }
     if (options.log) options.log('cached download failed verification, downloading again')
     fs.rmSync(dest, { force: true })
@@ -367,32 +396,65 @@ async function downloadUpdate(opts) {
 
   const urls = candidateUrls(asset.url, options)
   if (options.log) options.log(`downloading ${asset.name} (${asset.size || 0} bytes)`)
-  await downloadCandidates(urls, {
-    dest,
-    sha256: expected || undefined,
-    label: asset.name,
-    signal: options.signal,
-    log: options.log,
-    onProgress: options.onProgress,
-  })
+  const attempts = Math.max(1, Number(options.attempts) || MAX_DOWNLOAD_ATTEMPTS)
+  const baseDelay = Number(options.retryDelayMs) >= 0 ? Number(options.retryDelayMs) : RETRY_BASE_DELAY_MS
 
-  const bytes = fs.statSync(dest).size
-  const cleanup = (error) => {
-    try { fs.rmSync(dest, { force: true }) } catch { /* best effort */ }
-    return error
+  let lastError = null
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (options.signal && options.signal.cancelled) throw new CancelledError()
+    try {
+      await downloadCandidates(urls, {
+        dest,
+        sha256: expected || undefined,
+        label: asset.name,
+        signal: options.signal,
+        log: options.log,
+        onProgress: options.onProgress,
+      })
+    } catch (error) {
+      lastError = error
+      if (!isRetryable(error)) throw error
+      if (attempt < attempts) {
+        const delay = baseDelay * attempt
+        if (options.log) options.log(`download attempt ${attempt}/${attempts} failed (${error.message}); retrying in ${delay / 1000}s with resume`)
+        if (options.onRetry) {
+          try { options.onRetry({ attempt, attempts, message: error.message }) } catch { /* UI callback must not break the download */ }
+        }
+        await sleep(delay, options.signal)
+        continue
+      }
+      throw error
+    }
+
+    // Integrity gates. Size and PE failures delete the file and are retried.
+    const bytes = fs.statSync(dest).size
+    const cleanup = (error) => {
+      try { fs.rmSync(dest, { force: true }) } catch { /* best effort */ }
+      return error
+    }
+    if (asset.size && bytes !== asset.size) {
+      lastError = cleanup(fail('size', `Downloaded ${bytes} bytes, expected ${asset.size}`))
+    } else {
+      // Cheap sanity gate: an NSIS installer is a PE executable. This catches
+      // captive-portal HTML pages and truncated proxies that got a 200.
+      const head = Buffer.alloc(2)
+      const fd = fs.openSync(dest, 'r')
+      try { fs.readSync(fd, head, 0, 2, 0) } finally { fs.closeSync(fd) }
+      if (head.toString('latin1') !== 'MZ') {
+        lastError = cleanup(fail('pe', 'Downloaded file is not a Windows executable'))
+      } else {
+        return { file: dest, bytes, sha256: expected, cached: false, attempts: attempt }
+      }
+    }
+    if (attempt < attempts) {
+      if (options.log) options.log(`verification failed (${lastError.message}); retrying (${attempt}/${attempts})`)
+      if (options.onRetry) {
+        try { options.onRetry({ attempt, attempts, message: lastError.message }) } catch { /* ignore */ }
+      }
+      await sleep(baseDelay * attempt, options.signal)
+    }
   }
-  if (asset.size && bytes !== asset.size) {
-    throw cleanup(fail('size', `Downloaded ${bytes} bytes, expected ${asset.size}`))
-  }
-  // Cheap sanity gate: an NSIS installer is a PE executable. This catches
-  // captive-portal HTML pages and truncated proxies that got a 200.
-  const head = Buffer.alloc(2)
-  const fd = fs.openSync(dest, 'r')
-  try { fs.readSync(fd, head, 0, 2, 0) } finally { fs.closeSync(fd) }
-  if (head.toString('latin1') !== 'MZ') {
-    throw cleanup(fail('pe', 'Downloaded file is not a Windows executable'))
-  }
-  return { file: dest, bytes, sha256: expected, cached: false }
+  throw lastError || fail('network', 'Download failed')
 }
 
 /** Arguments that make the electron-builder NSIS installer upgrade in place. */
@@ -604,6 +666,49 @@ function runSelfTest() {
         await downloadUpdate({ asset: sizeRelease.assets[0], release: sizeRelease, destDir: path.join(tmp, 'size'), tmpDir: tmp })
       } catch (error) { sizeErr = error.code === 'size' }
       check('downloadUpdate rejects a size mismatch', sizeErr)
+
+      // A cut transfer (CN networks drop GitHub/CDN connections mid-file) must
+      // be retried from the partial file rather than failing the update.
+      let flakyHits = 0
+      let secondRange = null
+      const flakyServer = http.createServer((req, res) => {
+        flakyHits += 1
+        const range = /bytes=(\d+)-/u.exec(req.headers.range || '')
+        const start = range ? Number(range[1]) : 0
+        if (flakyHits === 1) {
+          res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': String(installerBytes.length) })
+          res.write(installerBytes.subarray(0, 20))
+          setTimeout(() => res.destroy(), 60)
+          return
+        }
+        if (range) secondRange = req.headers.range
+        const slice = installerBytes.subarray(start)
+        res.writeHead(start > 0 ? 206 : 200, {
+          'content-type': 'application/octet-stream',
+          'content-length': String(slice.length),
+        })
+        res.end(slice)
+      })
+      const flakyPort = await new Promise((resolve) => flakyServer.listen(0, '127.0.0.1', () => resolve(flakyServer.address().port)))
+      try {
+        const flakyAsset = {
+          name: 'DeepSeek-Harness-Desktop-Setup-0.4.0.exe',
+          size: installerBytes.length,
+          url: `http://127.0.0.1:${flakyPort}/dl/flaky.exe`,
+          sha256: installerSha,
+        }
+        const retried = await downloadUpdate({
+          asset: flakyAsset,
+          release: { assets: [] },
+          destDir: path.join(tmp, 'flaky'),
+          tmpDir: tmp,
+          retryDelayMs: 50,
+        })
+        check('downloadUpdate retries a cut transfer', retried.attempts === 2 && sha256File(retried.file) === installerSha)
+        check('retry resumed from the partial file', Boolean(secondRange) && /^bytes=20-/u.test(secondRange))
+      } finally {
+        flakyServer.close()
+      }
 
       const { server: htmlServer, port: htmlPort } = await startServer({
         '/repos/o/r/releases/latest': { body: JSON.stringify({ message: 'Not Found' }), type: 'application/json', status: 404 },

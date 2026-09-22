@@ -781,6 +781,7 @@ const updateState = {
   releaseUrl: '',
   error: null, // { code, message }
   progress: { received: 0, total: 0 },
+  retry: null, // { attempt, attempts, message } while a download is retried
   file: '',
   cached: false,
   checkedAt: 0,
@@ -871,6 +872,7 @@ function updateSnapshot() {
     releaseUrl: updateState.releaseUrl || `https://github.com/${cfg.updateRepo || DEFAULT_UPDATE_REPO}/releases`,
     error: updateState.error,
     progress: { ...updateState.progress },
+    retry: updateState.retry,
     file: updateState.file,
     cached: updateState.cached,
     checkedAt: updateState.checkedAt,
@@ -965,6 +967,7 @@ async function startUpdateDownload() {
   const transport = updateTransport()
   updateState.phase = 'downloading'
   updateState.error = null
+  updateState.retry = null
   updateState.progress = { received: 0, total: updateState.asset.size || 0 }
   updateSignal = { cancelled: false }
   const signal = updateSignal
@@ -982,6 +985,12 @@ async function startUpdateDownload() {
       proxiesFirst,
       signal,
       log: (line) => log(`update: ${line}`),
+      onRetry: (info) => {
+        // Flaky networks cut large transfers; the engine resumes and retries.
+        updateState.retry = info
+        log(`update: retrying download (${info.attempt}/${info.attempts}): ${info.message}`)
+        pushUpdateState()
+      },
       onProgress: (received, total) => {
         updateState.progress = {
           received,
@@ -992,11 +1001,13 @@ async function startUpdateDownload() {
     })
     updateState.file = result.file
     updateState.cached = result.cached === true
+    updateState.retry = null
     updateState.progress = { received: result.bytes, total: result.bytes }
     updateState.phase = 'ready'
-    log(`update: ready ${result.file}${result.cached ? ' (already verified)' : ''}`)
+    log(`update: ready ${result.file}${result.cached ? ' (already verified)' : ` (attempts=${result.attempts})`}`)
   } catch (error) {
     updateState.error = updateError(error)
+    updateState.retry = null
     updateState.phase = updateState.error.code === 'cancelled' ? 'available' : 'error'
     log(`update: download stopped ${updateState.error.message}`)
   } finally {

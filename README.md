@@ -4,7 +4,7 @@
 
 An Electron shell that turns the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web GUI into a real Windows desktop app: double-click an icon and the GUI opens in its own window while the checkout's `dsh web` service starts in the background. This directory is the **out-of-repo** shell — it never modifies the deepseek-harness checkout (the only optional, separately distributed change is the start-at-login row in `share/`, see [Optional checkout patch](#optional-checkout-patch)).
 
-Current version: **0.4.1** (Windows x64; NSIS installer + portable exe under `release/`). UI language: English / 中文 (follows the OS by default, switchable from the tray). Installed builds update themselves from GitHub Releases (see [App updates](#app-updates-self-update)).
+Current version: **0.4.2** (Windows x64; NSIS installer + portable exe under `release/`). UI language: English / 中文 (follows the OS by default, switchable from the tray). Installed builds update themselves from GitHub Releases (see [App updates](#app-updates-self-update)).
 
 ## Features
 
@@ -149,6 +149,7 @@ Notes and limits:
 
 - The app currently installed must be ≥ 0.4.0 — earlier builds have no updater, so the first hop is a manual install. Afterwards upgrades are one click.
 - The update window is a separate window: **closing it does not stop the download** (it resumes/picks up from disk when reopened); quit or *Cancel* stops it, keeping the partial file for resume.
+- Interrupted transfers retry automatically: the whole source list is re-tried (up to 4 rounds) and each round **resumes from the partial file**, so a cut 110 MB download loses no progress; the window shows a "resuming" notice meanwhile.
 - Portable builds cannot replace their own exe: they download + verify the installer and offer *Show file*. Unpackaged dev runs behave the same way (`DSH_DESKTOP_FORCE_UPDATE_INSTALL=1` forces the real hand-off for testing).
 - Behind a proxy/CDN that blocks GitHub, set `updateMirror` (e.g. `https://ghfast.top`) or switch `mirrorMode` to `cn`.
 - The installer is not code-signed, so Windows SmartScreen may warn on the very first install; in-place upgrades are silent.
@@ -284,6 +285,7 @@ Users then only download → verify → extract (minutes), no pnpm/build on thei
 | 0.3.0 | i18n (zh/en UI + docs), language switch in tray, GitHub CI + Release, MIT |
 | 0.4.0 | Self-update from GitHub Releases: startup check with skip-version, update window (notes/progress/options), resumable verified download, silent in-place NSIS upgrade; CI `--publish never` fix + `.sha256` assets |
 | 0.4.1 | Probe the direct GitHub host before downloading (accelerators straight away on networks that block `github.com`); richer Release body shown in the update window |
+| 0.4.2 | Interrupted transfers now retry the source list automatically, resuming from the partial file (up to 4 attempts) with a "resuming" notice in the update window — the fix for CN networks that cut ~110 MB downloads |
 
 ## License
 

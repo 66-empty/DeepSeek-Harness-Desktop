@@ -159,6 +159,7 @@ const DICTS = {
     'note.none': '该仓库还没有发布任何版本。',
     'note.available': '发现新版本 {0}(当前 {1})。',
     'note.downloading': '正在下载 {0} …',
+    'note.retrying': '网络中断,正在续传重试(第 {0}/{1} 次)…',
     'note.ready': '更新包已下载并通过完整性校验,点击「安装并重启」完成升级。',
     'note.readyPortable': '更新包已下载并通过完整性校验。便携版请手动替换 exe(已为你打开文件位置)。',
     'note.readyDev': '更新包已下载并通过校验。开发模式(未打包)不会自动安装。',
@@ -213,6 +214,7 @@ const DICTS = {
     'note.none': 'This repository has no published releases yet.',
     'note.available': 'Version {0} is available (you have {1}).',
     'note.downloading': 'Downloading {0} …',
+    'note.retrying': 'Transfer interrupted — resuming (attempt {0}/{1})…',
     'note.ready': 'The update was downloaded and verified. Click "Install and restart" to upgrade.',
     'note.readyPortable': 'The update was downloaded and verified. Portable builds replace the exe manually (the file location was opened for you).',
     'note.readyDev': 'The update was downloaded and verified. Unpackaged dev runs cannot self-install.',
@@ -316,7 +318,10 @@ function render() {
     const skipped = s.options && s.options.skipVersion && s.options.skipVersion === s.latest
     setNote(t('note.available', s.latest, s.currentVersion) + (s.asset ? ' · ' + fmtBytes(s.asset.size) : '') + (skipped ? '\n' + t('note.skip', s.latest) : ''))
   }
-  else if (phase === 'downloading') setNote(t('note.downloading', s.asset ? s.asset.name : ''), 'running')
+  else if (phase === 'downloading') {
+    const retry = s.retry
+    setNote(retry ? t('note.retrying', retry.attempt, retry.attempts) : t('note.downloading', s.asset ? s.asset.name : ''), 'running')
+  }
   else if (phase === 'ready') setNote(t(s.packaged === false ? 'note.readyDev' : (s.portable ? 'note.readyPortable' : 'note.ready')), 'ok')
   else if (phase === 'installing') setNote(t('note.installing'), 'running')
   else if (phase === 'error') setNote(t('note.error'), 'err')

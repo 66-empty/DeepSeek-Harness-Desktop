@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "productName": "DeepSeek Harness Desktop",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "Desktop shell for the DeepSeek Harness Web GUI. It starts `dsh web` from the deepseek-harness checkout and shows the GUI in a standalone Electron window (tray resident, optional autostart, self-update from GitHub Releases). On first run it can auto-install the whole runtime (portable Node + pinned deepseek-harness checkout + pnpm install/build) when no checkout is configured.",
   "author": "DeepSeek Harness Desktop maintainers",
