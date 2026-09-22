@@ -23,7 +23,7 @@ const { spawn, spawnSync } = require('child_process')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const { createProvisioner, DEFAULT_PROXIES } = require('./provision.js')
+const { createProvisioner, DEFAULT_PROXIES, probe } = require('./provision.js')
 const { checkForUpdate, downloadUpdate, launchInstaller, DEFAULT_REPO: DEFAULT_UPDATE_REPO, CancelledError } = require('./updater.js')
 const { makeDictionary } = require('./locales.js')
 
@@ -816,6 +816,31 @@ function updateTransport() {
   }
 }
 
+/** Cached reachability of the direct GitHub download host (10 minute TTL). */
+let githubDirectProbe = null
+
+/**
+ * Whether the built-in accelerators should be tried before the direct GitHub
+ * URL. Release assets live on github.com, which CN networks commonly block
+ * while api.github.com (the version check) keeps working — probing once turns
+ * a 15-second connect timeout per file into an immediate accelerator hit.
+ * @returns {Promise<boolean>}
+ */
+async function preferProxiesFirst() {
+  const cfg = settings()
+  const mode = cfg.mirrorMode || 'auto'
+  if (mode === 'cn') return true
+  if (mode === 'direct') return false
+  if (cfg.updateMirror) return false // an explicit mirror already leads the chain
+  if (githubDirectProbe && Date.now() - githubDirectProbe.at < 10 * 60_000) {
+    return !githubDirectProbe.reachable
+  }
+  const reachable = await probe('https://github.com/robots.txt', 4_000)
+  githubDirectProbe = { at: Date.now(), reachable }
+  log(`update: github.com direct ${reachable ? 'reachable' : 'unreachable'} → accelerators ${reachable ? 'as fallback' : 'first'}`)
+  return !reachable
+}
+
 /**
  * Detect a runtime (dsh) that lags behind the manifest pinned by this build:
  * an app upgrade usually ships a newer harness ref, which only the runtime
@@ -945,6 +970,8 @@ async function startUpdateDownload() {
   const signal = updateSignal
   pushUpdateState()
   try {
+    const proxiesFirst = await preferProxiesFirst()
+    if (signal.cancelled) throw new CancelledError()
     const result = await downloadUpdate({
       asset: updateState.asset,
       release: updateState.release,
@@ -952,7 +979,7 @@ async function startUpdateDownload() {
       tmpDir: updateDownloadDir(),
       mirror: transport.mirror,
       proxies: transport.proxies,
-      proxiesFirst: transport.proxiesFirst,
+      proxiesFirst,
       signal,
       log: (line) => log(`update: ${line}`),
       onProgress: (received, total) => {

@@ -4,7 +4,7 @@
 
 An Electron shell that turns the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web GUI into a real Windows desktop app: double-click an icon and the GUI opens in its own window while the checkout's `dsh web` service starts in the background. This directory is the **out-of-repo** shell — it never modifies the deepseek-harness checkout (the only optional, separately distributed change is the start-at-login row in `share/`, see [Optional checkout patch](#optional-checkout-patch)).
 
-Current version: **0.4.0** (Windows x64; NSIS installer + portable exe under `release/`). UI language: English / 中文 (follows the OS by default, switchable from the tray). Installed builds update themselves from GitHub Releases (see [App updates](#app-updates-self-update)).
+Current version: **0.4.1** (Windows x64; NSIS installer + portable exe under `release/`). UI language: English / 中文 (follows the OS by default, switchable from the tray). Installed builds update themselves from GitHub Releases (see [App updates](#app-updates-self-update)).
 
 ## Features
 
@@ -283,6 +283,7 @@ Users then only download → verify → extract (minutes), no pnpm/build on thei
 | 0.2.6 | Window icon fallback to exe icon (blank taskbar fix) |
 | 0.3.0 | i18n (zh/en UI + docs), language switch in tray, GitHub CI + Release, MIT |
 | 0.4.0 | Self-update from GitHub Releases: startup check with skip-version, update window (notes/progress/options), resumable verified download, silent in-place NSIS upgrade; CI `--publish never` fix + `.sha256` assets |
+| 0.4.1 | Probe the direct GitHub host before downloading (accelerators straight away on networks that block `github.com`); richer Release body shown in the update window |
 
 ## License
 

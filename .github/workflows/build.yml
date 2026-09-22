@@ -71,3 +71,13 @@ jobs:
             release/DeepSeek-Harness-Desktop-Portable-*.exe
             release/DeepSeek-Harness-Desktop-Portable-*.exe.sha256
           generate_release_notes: true
+          body: |
+            Desktop shell for the DeepSeek Harness Web GUI — Windows x64.
+
+            | Asset | Use |
+            |---|---|
+            | `DeepSeek-Harness-Desktop-Setup-*.exe` | Recommended. Per-user installer; **installed apps update themselves** from this release |
+            | `DeepSeek-Harness-Desktop-Portable-*.exe` | No install; portable builds cannot self-update (they download and verify the installer for you) |
+            | `*.sha256` | Checksums, verified automatically by the in-app updater |
+
+            First run provisions the runtime automatically (portable Node + a pinned deepseek-harness checkout, with CN mirrors and a resume-friendly wizard). Existing installs: **Tray → Check for updates…**, or wait for the startup check.
