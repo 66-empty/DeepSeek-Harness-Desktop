@@ -16,6 +16,8 @@ npm install                 # installs Electron (needs network, ~200 MB)
 npm run smoke               # headless boot check against the real service
 npm run e2e                 # real-window regression
 npm run provision:selftest  # provisioning engine offline self-test
+npm run update:selftest     # self-update engine offline drill (local fixture server)
+npm run update:probe        # update window + preload bridge + one live release check
 npm start                   # run the app
 ```
 
