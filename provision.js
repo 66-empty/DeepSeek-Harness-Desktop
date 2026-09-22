@@ -1293,6 +1293,7 @@ if (require.main === module && process.argv.includes('--selftest')) {
 module.exports = {
   createProvisioner,
   atLeastNode,
+  request,
   downloadCandidates,
   extractSingleTopDir,
   extractSingleTopDirPortable,
@@ -1309,4 +1310,5 @@ module.exports = {
   CancelledError,
   ENGINE_VERSION,
   NODE_MIN,
+  DEFAULT_PROXIES,
 }

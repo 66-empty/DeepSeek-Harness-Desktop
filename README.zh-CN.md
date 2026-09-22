@@ -7,7 +7,7 @@ Electron 窗口中打开 GUI,并自动在后台启动仓库自带的 `dsh web` �
 **仓库外**的配套外壳,不修改 deepseek-harness 仓库中的任何文件(唯一的可选改动见
 「仓库配套改动」一节,按需打补丁)。
 
-当前版本:**0.3.0**(Windows x64;NSIS 安装版 + 便携版,见 `release/`)。界面语言:中文 / English(默认跟随系统,托盘菜单可切换)。
+当前版本:**0.4.0**(Windows x64;NSIS 安装版 + 便携版,见 `release/`)。界面语言:中文 / English(默认跟随系统,托盘菜单可切换)。安装版可自动从 GitHub Releases 升级(见「应用自动升级」)。
 
 ## 功能特性
 
@@ -18,6 +18,10 @@ Electron 窗口中打开 GUI,并自动在后台启动仓库自带的 `dsh web` �
 - **普通权限可装**:不需要管理员或开发者模式(0.2.3+ 内置解压回退、junction 重建、
   构建元数据自动适配无 `.git` 源码包),系统里装有旧版 Node 也不会影响装配
   (0.2.5+ 全程把便携 Node 置于 PATH);
+- **应用自动升级**:安装版启动后自动检查 GitHub Releases(托盘菜单也可手动检查),
+  下载新版安装包(支持断点续传)并做完整性校验(资产 digest / 发布的 `.sha256` +
+  文件大小 + PE 头),随后静默原地升级并自动重启;便携版无法替换自身 exe,改为
+  下载校验后提示手动替换;
 - **独立窗口**:无浏览器标签/工具栏,窗口即应用;
 - **托盘驻留**:关闭窗口默认隐藏到托盘,服务继续运行;托盘菜单可随时重新打开、
   在系统浏览器中打开、重启服务或退出(停止服务);
@@ -31,7 +35,8 @@ Electron 窗口中打开 GUI,并自动在后台启动仓库自带的 `dsh web` �
 - **故障可见**:主进程异常写入 `desktop.log` + `crashes.log` 并弹错误框,不再
   静默失败(0.2.1+);窗口图标读取失败时自动回退 exe 内嵌图标,避免任务栏空白
   (0.2.6+);
-- **自动化自检**:`smoke` / `e2e` / `probe` / `provision:selftest`(见「自动化检查」)。
+- **自动化自检**:`smoke` / `e2e` / `probe` / `provision:selftest` / `update:selftest` /
+  `update:probe`(见「自动化检查」)。
 
 ## 工作原理
 
@@ -192,6 +197,7 @@ powershell -ExecutionPolicy Bypass -File scripts\create-shortcuts.ps1  # 桌面+
 | 单击托盘图标 | 打开主窗口 |
 | 托盘 → 在系统浏览器中打开 | 用默认浏览器打开当前 GUI URL |
 | 托盘 → 重新启动服务 | 停掉后端并重新拉起(重读 settings.json,仓库更新后用它) |
+| 托盘 → 检查更新… | 打开升级窗口(版本检查、更新说明、下载进度、选项) |
 | 托盘 → 退出(停止服务) | 结束服务进程树并退出应用 |
 | Ctrl+R / F12 / Ctrl+Q | 重新加载页面 / 开发者工具 / 退出(菜单栏已隐藏,快捷键仍可用) |
 
@@ -227,6 +233,11 @@ powershell -ExecutionPolicy Bypass -File scripts\create-shortcuts.ps1  # 桌面+
 | `language` | `"auto"` | 界面语言:`auto`(跟随系统)/ `zh` / `en`(0.3.0+;托盘菜单「语言」可即时切换) |
 | `dshRef` | `null` | 覆盖装配的 deepseek-harness 版本(默认取装配清单 `dsh.ref`) |
 | `nodeMirrorBase` / `registryMirror` / `githubProxies` | `null` | 高级:自定义 Node 镜像站、npm registry 镜像、GitHub 加速代理列表(默认内置 npmmirror 与常用代理) |
+| `checkUpdates` | `true` | 启动后静默检查新版本(托盘菜单同名开关即时修改) |
+| `skipVersion` | `""` | 用户选择“跳过此版本”的版本号(如 `0.4.1`) |
+| `updateIncludePrerelease` | `false` | 是否把预发布版本也算作可升级 |
+| `updateMirror` | `""` | 可选:GitHub 下载地址的加速前缀(如 `https://ghfast.top`);留空=先直连,失败再试内置加速 |
+| `updateRepo` | `""`(内置) | 发布仓库 `owner/name`,供 fork 使用 |
 
 修改 `port` / `extraArgs` / `repoPath` 后,用托盘 →「重新启动服务」生效。
 
@@ -273,6 +284,47 @@ powershell -ExecutionPolicy Bypass -File scripts\create-shortcuts.ps1  # 桌面+
   `DSH_DESKTOP_NODE` 指向任意 node.exe,托盘 →「重新启动服务」生效;注意一旦走
   装配向导,跑的是引擎自己的便携 Node(想用自己的,请用「选择已有仓库…」)。
 
+## 应用自动升级
+
+外壳**自身**的升级走本仓库的 GitHub Releases;deepseek-harness **运行环境**是另一条
+版本线,仍由装配向导负责(新版本外壳若固定了更新的 dsh 版本,升级窗口页脚会提示
+「检测到新的运行环境」并给出一键入口)。
+
+实现见 `updater.js`(纯 Node,自带 `--selftest`),四步:
+
+1. **检查**:请求 `GET /repos/<repo>/releases/latest`(开启预发布时为 `/releases`),
+   用完整 semver 规则(含预发布标识)与 `app.getVersion()` 比较;
+2. **下载**:取 `DeepSeek-Harness-Desktop-Setup-<版本>.exe` 存到
+   `%APPDATA%\DeepSeek Harness Desktop\updates`,支持断点续传(`Range`),多源回退:
+   `updateMirror` 前缀 → 直连 GitHub → 内置加速代理(`mirrorMode: cn` 时加速优先);
+3. **校验**:优先用 GitHub 资产 digest,其次用随包发布的 `.sha256`;再校验文件大小与
+   PE 头,任一步不通过即删除文件;
+4. **安装**:执行 `Setup-<版本>.exe --updated /S --force-run`——electron-builder 的
+   NSIS 安装脚本遇到 `--updated` 会跳过所有页面、按注册表记录的目录原地覆盖安装,
+   `/S` 静默,`--force-run` 让安装完成后自动重新启动应用。
+
+入口与行为:
+
+| 入口 | 行为 |
+|---|---|
+| 启动后 8 秒 | 静默检查;发现新版本弹对话框:「立即更新」/「稍后」/「跳过此版本」 |
+| 开机自启(`--hidden`) | 只发托盘气泡,不打断用户 |
+| 托盘 →「检查更新…」 | 打开升级窗口(版本、更新说明、进度、选项) |
+| 托盘 →「⬆ 有可用更新 x.y.z」 | 有未处理的新版本时出现 |
+| 应用菜单 →「检查更新…」 | 同上 |
+
+说明与边界:
+
+- 需要当前安装的版本 **≥ 0.4.0**(更早的版本没有升级模块),第一次升级需手动安装一次,
+  之后一键完成;
+- 升级窗口是独立窗口:**关闭窗口不会中断下载**(重开继续显示进度);托盘退出或点
+  「取消下载」才会停止,已下载的部分文件保留以便续传;
+- **便携版**无法替换自身 exe:会下载并校验安装包,然后提示「打开文件位置」手动替换;
+  未打包的开发运行同理(测试真实交接链路可设 `DSH_DESKTOP_FORCE_UPDATE_INSTALL=1`);
+- 代理/网络屏蔽 GitHub 时,可在升级窗口填「下载镜像」前缀(如 `https://ghfast.top`),
+   或把 `mirrorMode` 切到 `cn`;
+- 安装包**未做代码签名**,首次安装可能出现 SmartScreen 提示;之后原地升级是静默的。
+
 ## 自动化检查
 
 | 命令 | 模式 | 验证内容 |
@@ -281,6 +333,8 @@ powershell -ExecutionPolicy Bypass -File scripts\create-shortcuts.ps1  # 桌面+
 | `npm run e2e` | `--e2e` | 真实窗口:加载 GUI 页面成功(`did-finish-load`)即 PASS 并自动退出;120 秒兜底超时判 FAIL |
 | `npm run probe` | `--probe` | 真实窗口内 DOM 驱动:打开 设置 → 通用设置,断言「开机自启」行渲染且桥接存在;`DSH_PROBE_TOGGLE=1` 时额外把开关来回各点一次并读回验证 |
 | `npm run provision:selftest` | — | 装配引擎离线自测(纯 Node,无需网络/Electron):版本门、镜像 URL 变换、file:// 下载与校验、zip 解压重定位、引擎 API 形态 |
+| `npm run update:selftest` | — | 升级引擎离线演练(纯 Node,内置本地 fixture 服务器):semver 比较、发布信息解析、安装包挑选、下载/断点续传/校验和/大小/PE 头 |
+| `npm run update:probe` | `--update-probe` | 真实窗口(隐藏):加载 update.html、验证 preload 桥接、走一次真实版本检查;渲染层出现 console error 即 FAIL |
 
 > `probe` 的 PASS 条件包含设置页那行开关,而该行只在仓库打了配套补丁并重建
 > 产物后才存在——未打补丁的仓库上 `probe` 会以退出码 1 失败,属预期行为。
@@ -295,6 +349,8 @@ powershell -ExecutionPolicy Bypass -File scripts\create-shortcuts.ps1  # 桌面+
 | `DSH_PROVISION_FILELOG=1` | 装配日志同时写入 `desktop.log` |
 | `DSH_FORCE_NODE_UNZIP=1` | 装配解压跳过 tar,强制走内置解压器(测试) |
 | `DSH_PACK_DEBUG=1` | 装配解压等待/别名修复输出详细日志 |
+| `DSH_DESKTOP_SKIP_UPDATE_CHECK=1` | 完全不访问升级服务器(离线/测试) |
+| `DSH_DESKTOP_FORCE_UPDATE_INSTALL=1` | 让未打包的开发运行也真正把安装包交给 Windows(测试升级链路) |
 | `ELECTRON_MIRROR` / `ELECTRON_BUILDER_BINARIES_MIRROR` | electron-builder 下载镜像(`dist:cn` 已内置) |
 
 ## 仓库配套改动(可选)—「通用设置 开机自启」行
@@ -341,7 +397,15 @@ npm run dist:dir    # 仅产出 release/win-unpacked(免安装目录版,调试�
   `%APPDATA%\DeepSeek Harness Desktop\settings.json`)。
 
 版本号取自 `package.json` 的 `version`,发新版前先递增;产物命名规则在
-`package.json` 的 `build` 段。
+`package.json` 的 `build` 段。打包脚本统一带 `--publish never`:否则 electron-builder
+在打 tag 构建时会尝试隐式发布并要求 `GH_TOKEN`,导致构建失败;发布由
+[build 工作流](.github/workflows/build.yml)负责——它跑两个引擎自测、每次 push 打包、
+tag 构建时额外生成每个 exe 的 `.sha256` 校验文件,并为 `v*` 标签创建 GitHub Release
+(应用内升级读取的正是这个 Release)。
+
+**发布一次升级**:改 `package.json` 版本号 → 提交 → `git tag vX.Y.Z && git push origin vX.Y.Z`
+→ 等工作流完成 → 确认 Release 里包含 `DeepSeek-Harness-Desktop-Setup-X.Y.Z.exe`
+(以及 `.sha256`、`.blockmap`、便携版)。已安装的应用下次启动检查时即可看到新版本。
 
 ### 安装版行为
 
@@ -480,7 +544,16 @@ npm run pack:runtime   # 可加 --repo <路径> --ref <标签> --out <目录>
 - **任务栏图标空白**:0.2.6+ 在图标读取失败时自动回退 exe 内嵌图标;仍空白多为
   Windows 图标缓存——重启“Windows 资源管理器”或取消/重新固定任务栏图标;
 - **装配进度卡在“解压”且报 Can't create / tar error**(旧版现象):无符号链接权限
-  的机器上 tar 会失败,0.2.3+ 已自动改用内置解压器,升级即可。
+  的机器上 tar 会失败,0.2.3+ 已自动改用内置解压器,升级即可;
+- **检查更新失败**:升级窗口会给出具体原因(HTTP 404 / 网络不可达 / 校验不符等)。
+  国内网络或公司代理常需填「下载镜像」前缀或切 `mirrorMode: cn`;若提示
+  “该仓库还没有发布任何版本”,说明对应 tag 的 Release 还没生成(见「打包发布」);
+- **升级下载中断**:关窗口不中断下载;重新打开窗口会显示进度。中途断网的部分文件
+  保留在 `%APPDATA%\DeepSeek Harness Desktop\updates`,点「下载更新」会从断点续传;
+- **升级后应用没重启**:`--force-run` 只在静默安装时生效;若安装程序被 SmartScreen
+  拦下,手动运行一次 Setup 即可,数据与设置不受影响(均在 `%APPDATA%`);
+- **升级后仍显示旧版本**:确认安装目录未被手工移动过(NSIS 按注册表记录的目录原地
+  升级);必要时用新版 Setup 手动覆盖安装一次。
 
 版本号统一维护在 `package.json`(`version` 与 `build` 段的产物命名联动);
 发新版前先递增版本,再 `npm run dist` 产出对应版本号的安装包。
@@ -498,3 +571,4 @@ npm run pack:runtime   # 可加 --repo <路径> --ref <标签> --out <目录>
 | 0.2.5 | 装配与后端子进程 PATH 置顶便携 Node,系统旧 Node 不再劫持构建 |
 | 0.2.6 | 窗口图标读取失败自动回退 exe 内嵌图标,修复任务栏空白 |
 | 0.3.0 | 国际化:界面双语(托盘/对话框/向导/安装器,跟随系统+手动切)、README 中英分版、GitHub CI 与 Release、MIT 许可 |
+| 0.4.0 | 应用自动升级:启动静默检查 + 可跳过版本、升级窗口(版本/更新说明/进度/选项)、断点续传 + 多源 + 完整性校验的下载、静默原地 NSIS 升级;修复 CI 隐式发布导致的构建失败并发布 `.sha256` 校验文件 |

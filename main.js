@@ -23,7 +23,8 @@ const { spawn, spawnSync } = require('child_process')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const { createProvisioner } = require('./provision.js')
+const { createProvisioner, DEFAULT_PROXIES } = require('./provision.js')
+const { checkForUpdate, downloadUpdate, launchInstaller, DEFAULT_REPO: DEFAULT_UPDATE_REPO, CancelledError } = require('./updater.js')
 const { makeDictionary } = require('./locales.js')
 
 const APP_DIR = __dirname
@@ -34,10 +35,16 @@ const ICON_PATH = path.join(APP_DIR, 'assets', 'icon.ico')
 const PRELOAD_PATH = path.join(APP_DIR, 'preload.js')
 const MANIFEST_PATH = path.join(APP_DIR, 'runtime.manifest.json')
 const PROVISION_HTML = path.join(APP_DIR, 'provision.html')
+const UPDATE_HTML = path.join(APP_DIR, 'update.html')
 const PROVISION_IPC = 'dsh-desktop:provision'
+const UPDATE_IPC = 'dsh-desktop:update'
 const STARTUP_TIMEOUT_MS = 90_000
 const SHUTDOWN_GRACE_MS = 4_000
 const MAX_LOG_BYTES = 2 * 1024 * 1024
+/** How long to let the launch of an in-place upgrade settle before quitting. */
+const UPDATE_INSTALL_DELAY_MS = 1_200
+/** Delay before the silent startup update check (the GUI must be usable first). */
+const UPDATE_CHECK_DELAY_MS = 8_000
 
 /**
  * Window/tray icon, decoded lazily (nativeImage needs no window but avoids
@@ -62,11 +69,14 @@ function appIcon() {
 const SMOKE_MODE = process.argv.includes('--smoke')
 const E2E_MODE = process.argv.includes('--e2e')
 const PROBE_MODE = process.argv.includes('--probe')
+const UPDATE_PROBE_MODE = process.argv.includes('--update-probe')
 const HIDDEN_MODE = process.argv.includes('--hidden')
 /** Automated modes must never block on a modal dialog. */
-const NONINTERACTIVE = SMOKE_MODE || E2E_MODE || PROBE_MODE
+const NONINTERACTIVE = SMOKE_MODE || E2E_MODE || PROBE_MODE || UPDATE_PROBE_MODE
 /** electron-builder portable target runs from a throwaway extraction dir. */
 const RUNNING_PORTABLE = Boolean(process.env.PORTABLE_EXECUTABLE_DIR || process.env.PORTABLE_EXECUTABLE_FILE)
+/** Internal test hook: exercise the real installer hand-off from a dev run. */
+const FORCE_UPDATE_INSTALL = process.env.DSH_DESKTOP_FORCE_UPDATE_INSTALL === '1'
 
 /* ------------------------------------------------- global error reporting */
 
@@ -203,6 +213,8 @@ let tray = null
 let startRequestSeq = 0 // invalidates stale async startup flows
 let provisioning = false // runtime wizard owns the app until done/cancelled
 let provisioner = null
+let updateWindow = null // separate window so the GUI keeps its session
+let updateSignal = null // cancellation token of an in-flight download
 
 function settings() {
   return {
@@ -219,6 +231,11 @@ function settings() {
     nodeMirrorBase: null, // null = npmmirror
     registryMirror: null, // null = manifest registryMirror
     githubProxies: null, // null = built-in proxy list
+    checkUpdates: true, // silent release check on startup
+    skipVersion: '', // version the user asked to skip
+    updateIncludePrerelease: false, // consider pre-releases
+    updateMirror: '', // optional download mirror prefix (e.g. https://ghfast.top)
+    updateRepo: '', // '' = built-in repository (owner/name)
     ...loadSettings(),
   }
 }
@@ -745,6 +762,422 @@ function cancelProvision() {
   if (provisioner) provisioner.cancel()
 }
 
+/* ----------------------------------------------------------- self-update */
+
+/**
+ * Update lifecycle. The heavy lifting (release lookup, download, checksum
+ * verification, installer hand-off) lives in updater.js; this section owns the
+ * UI-facing state machine, the tray/dialog prompts and the window.
+ *
+ * Phases: idle → checking → (available → downloading → ready → installing)
+ *         with `current` / `none` / `error` as terminal states of a check.
+ */
+const updateState = {
+  phase: 'idle',
+  latest: '',
+  release: null,
+  asset: null,
+  notes: '',
+  releaseUrl: '',
+  error: null, // { code, message }
+  progress: { received: 0, total: 0 },
+  file: '',
+  cached: false,
+  checkedAt: 0,
+}
+
+/** Where installers are downloaded (survives restarts, unlike temp dirs). */
+function updateDownloadDir() {
+  return path.join(app.getPath('userData'), 'updates')
+}
+
+/**
+ * GitHub accelerators used when the direct URL fails. Mirror mode `cn` tries
+ * them first (same policy as the runtime installer), `direct` disables them.
+ */
+function updateProxies() {
+  if ((settings().mirrorMode || 'auto') === 'direct') return []
+  const configured = settings().githubProxies
+  if (Array.isArray(configured) && configured.length > 0) return configured
+  return DEFAULT_PROXIES
+}
+
+/**
+ * Update transport options derived from settings.
+ * @returns {{repo:string, mirror:string, proxies:string[], proxiesFirst:boolean}}
+ */
+function updateTransport() {
+  const cfg = settings()
+  return {
+    repo: cfg.updateRepo || DEFAULT_UPDATE_REPO,
+    mirror: cfg.updateMirror || '',
+    proxies: updateProxies(),
+    proxiesFirst: (cfg.mirrorMode || 'auto') === 'cn',
+  }
+}
+
+/**
+ * Detect a runtime (dsh) that lags behind the manifest pinned by this build:
+ * an app upgrade usually ships a newer harness ref, which only the runtime
+ * wizard installs.
+ */
+function runtimeStaleness() {
+  const provisioned = readJsonFile(path.join(runtimeDir(), 'provisioned.json'))
+  const installedRef = provisioned && provisioned.ref ? String(provisioned.ref) : ''
+  const wantedRef = (loadManifest().dsh || {}).ref || ''
+  return {
+    runtimeRef: installedRef,
+    manifestRef: wantedRef,
+    runtimeOutdated: Boolean(installedRef && wantedRef && installedRef !== wantedRef),
+  }
+}
+
+/** Immutable view of everything update.html renders. */
+function updateSnapshot() {
+  const cfg = settings()
+  const runtime = runtimeStaleness()
+  return {
+    phase: updateState.phase,
+    currentVersion: app.getVersion(),
+    latest: updateState.latest,
+    release: updateState.release,
+    asset: updateState.asset,
+    notes: updateState.notes,
+    releaseUrl: updateState.releaseUrl || `https://github.com/${cfg.updateRepo || DEFAULT_UPDATE_REPO}/releases`,
+    error: updateState.error,
+    progress: { ...updateState.progress },
+    file: updateState.file,
+    cached: updateState.cached,
+    checkedAt: updateState.checkedAt,
+    portable: RUNNING_PORTABLE,
+    packaged: app.isPackaged,
+    repo: cfg.updateRepo || DEFAULT_UPDATE_REPO,
+    runtimeRef: runtime.runtimeRef,
+    manifestRef: runtime.manifestRef,
+    runtimeOutdated: runtime.runtimeOutdated,
+    options: {
+      autoCheck: cfg.checkUpdates !== false,
+      includePrerelease: cfg.updateIncludePrerelease === true,
+      mirror: cfg.updateMirror || '',
+      skipVersion: cfg.skipVersion || '',
+    },
+  }
+}
+
+function sendUpdateEvent(evt) {
+  try {
+    if (updateWindow && !updateWindow.isDestroyed() && !updateWindow.webContents.isLoading()) {
+      updateWindow.webContents.send(`${UPDATE_IPC}:event`, evt)
+    }
+  } catch { /* window may vanish mid-send */ }
+}
+
+function pushUpdateState() {
+  const snapshot = updateSnapshot()
+  sendUpdateEvent({ type: 'state', state: snapshot })
+  return snapshot
+}
+
+/** Normalize any thrown value into the `{ code, message }` shape the UI expects. */
+function updateError(error) {
+  if (error instanceof CancelledError || (error && error.name === 'CancelledError')) {
+    return { code: 'cancelled', message: String(error.message || 'cancelled') }
+  }
+  return {
+    code: error && error.code ? String(error.code) : 'api',
+    message: String(error && error.message ? error.message : error),
+  }
+}
+
+/**
+ * Look for a newer release.
+ * @param {string} reason - for the log line (startup | window | tray | test).
+ * @returns {Promise<object>} the resulting snapshot.
+ */
+async function checkUpdates(reason) {
+  if (['checking', 'downloading', 'installing'].includes(updateState.phase)) return updateSnapshot()
+  const transport = updateTransport()
+  updateState.phase = 'checking'
+  updateState.error = null
+  pushUpdateState()
+  log(`update: checking releases (${reason}) repo=${transport.repo}`)
+  try {
+    const result = await checkForUpdate({
+      repo: transport.repo,
+      currentVersion: app.getVersion(),
+      includePrerelease: settings().updateIncludePrerelease === true,
+      mirror: transport.mirror,
+      proxies: transport.proxies,
+      proxiesFirst: transport.proxiesFirst,
+      portable: RUNNING_PORTABLE,
+      log: (line) => log(`update: ${line}`),
+    })
+    updateState.checkedAt = Date.now()
+    updateState.latest = result.latest || ''
+    updateState.release = result.release || null
+    updateState.asset = result.asset || null
+    updateState.notes = result.notes || ''
+    updateState.releaseUrl = result.url || updateState.releaseUrl
+    updateState.progress = { received: 0, total: (result.asset && result.asset.size) || 0 }
+    updateState.file = ''
+    updateState.cached = false
+    updateState.phase = result.status === 'update-available'
+      ? 'available'
+      : (result.status === 'up-to-date' ? 'current' : 'none')
+    log(`update: ${result.status}${result.latest ? ` latest=${result.latest}` : ''} (current ${app.getVersion()})`)
+  } catch (error) {
+    updateState.phase = 'error'
+    updateState.error = updateError(error)
+    log(`update: check failed ${updateState.error.message}`)
+  }
+  refreshTrayMenu()
+  return pushUpdateState()
+}
+
+/** Download (or resume) the installer of the available release. */
+async function startUpdateDownload() {
+  if (updateState.phase === 'downloading' || !updateState.asset) return updateSnapshot()
+  const transport = updateTransport()
+  updateState.phase = 'downloading'
+  updateState.error = null
+  updateState.progress = { received: 0, total: updateState.asset.size || 0 }
+  updateSignal = { cancelled: false }
+  const signal = updateSignal
+  pushUpdateState()
+  try {
+    const result = await downloadUpdate({
+      asset: updateState.asset,
+      release: updateState.release,
+      destDir: updateDownloadDir(),
+      tmpDir: updateDownloadDir(),
+      mirror: transport.mirror,
+      proxies: transport.proxies,
+      proxiesFirst: transport.proxiesFirst,
+      signal,
+      log: (line) => log(`update: ${line}`),
+      onProgress: (received, total) => {
+        updateState.progress = {
+          received,
+          total: total || (updateState.asset && updateState.asset.size) || 0,
+        }
+        sendUpdateEvent({ type: 'progress', ...updateState.progress })
+      },
+    })
+    updateState.file = result.file
+    updateState.cached = result.cached === true
+    updateState.progress = { received: result.bytes, total: result.bytes }
+    updateState.phase = 'ready'
+    log(`update: ready ${result.file}${result.cached ? ' (already verified)' : ''}`)
+  } catch (error) {
+    updateState.error = updateError(error)
+    updateState.phase = updateState.error.code === 'cancelled' ? 'available' : 'error'
+    log(`update: download stopped ${updateState.error.message}`)
+  } finally {
+    updateSignal = null
+  }
+  refreshTrayMenu()
+  return pushUpdateState()
+}
+
+/** Abort an in-flight download (the partial file is kept for resume). */
+function cancelUpdateDownload() {
+  if (updateSignal) updateSignal.cancelled = true
+  return updateSnapshot()
+}
+
+/**
+ * Hand the verified installer to Windows and quit. The NSIS installer was
+ * built by electron-builder, so `--updated /S --force-run` upgrades in place
+ * (same directory, per-user) and relaunches the app afterwards.
+ */
+function installUpdate() {
+  const t = uiT().t
+  const file = updateState.file
+  if (!file || !fs.existsSync(file)) {
+    updateState.phase = 'error'
+    updateState.error = { code: 'io', message: `installer missing: ${file || '(none)'}` }
+    return pushUpdateState()
+  }
+  if (!FORCE_UPDATE_INSTALL && (RUNNING_PORTABLE || !app.isPackaged)) {
+    // Self-replacement is impossible (unpacked dir) or unsafe (portable exe):
+    // keep the verified file and point the user at it instead.
+    const detail = RUNNING_PORTABLE ? t('update.install.portable') : t('update.install.dev')
+    const choice = dialog.showMessageBoxSync(updateWindow ?? mainWindow ?? undefined, {
+      type: 'info',
+      title: APP_NAME,
+      message: detail,
+      detail: file,
+      buttons: [t('update.install.reveal'), t('update.install.close')],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (choice === 0) shell.showItemInFolder(file)
+    return pushUpdateState()
+  }
+  updateState.phase = 'installing'
+  pushUpdateState()
+  try {
+    const pid = launchInstaller(file, { log: (line) => log(`update: ${line}`) })
+    log(`update: installer started (pid=${pid}), quitting for the upgrade`)
+  } catch (error) {
+    updateState.phase = 'error'
+    updateState.error = updateError(error)
+    log(`update: installer launch failed ${updateState.error.message}`)
+    dialog.showMessageBoxSync(updateWindow ?? mainWindow ?? undefined, {
+      type: 'error',
+      title: t('update.fail.title'),
+      message: t('update.install.failed', updateState.error.message),
+      buttons: [t('update.install.close')],
+    })
+    return pushUpdateState()
+  }
+  setTimeout(() => quitApp(), UPDATE_INSTALL_DELAY_MS).unref()
+  return updateSnapshot()
+}
+
+/** Open (or focus) the update window. Kept out of `mainWindow` on purpose. */
+function ensureUpdateWindow() {
+  if (updateWindow && !updateWindow.isDestroyed()) {
+    updateWindow.show()
+    updateWindow.focus()
+    return updateWindow
+  }
+  const width = 760
+  const height = 680
+  const parentBounds = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()
+    ? mainWindow.getBounds()
+    : null
+  const win = new BrowserWindow({
+    width,
+    height,
+    minWidth: 620,
+    minHeight: 520,
+    title: `${uiT().t('update.windowTitle')} — ${APP_NAME}`,
+    icon: appIcon() || undefined,
+    show: false,
+    backgroundColor: '#0d1526',
+    autoHideMenuBar: true,
+    ...(parentBounds
+      ? {
+        x: Math.round(parentBounds.x + Math.max(0, (parentBounds.width - width) / 2)),
+        y: Math.round(parentBounds.y + Math.max(0, (parentBounds.height - height) / 2)),
+      }
+      : {}),
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: PRELOAD_PATH,
+    },
+  })
+  win.once('ready-to-show', () => win.show())
+  win.on('close', (event) => {
+    // Closing hides the window; a running download continues in the background.
+    if (!isQuitting && settings().closeToTray) {
+      event.preventDefault()
+      win.hide()
+    }
+  })
+  win.on('closed', () => { if (updateWindow === win) updateWindow = null })
+  win.setMenu(null)
+  win.loadFile(UPDATE_HTML)
+  updateWindow = win
+  return win
+}
+
+/** Tray/GUI entry point: show the window and refresh the release state. */
+function openUpdateWindow(reason) {
+  ensureUpdateWindow()
+  void checkUpdates(reason)
+  return updateWindow
+}
+
+/**
+ * Silent startup check: never interrupts a running setup, respects the
+ * "skip this version" choice, and stays non-modal when the GUI is hidden
+ * (autostart) by falling back to a tray balloon.
+ */
+async function autoCheckUpdates() {
+  if (provisioning) {
+    log('update: startup check skipped (runtime setup in progress)')
+    return
+  }
+  const snapshot = await checkUpdates('startup')
+  if (snapshot.phase !== 'available') return
+  const cfg = settings()
+  if (cfg.skipVersion && cfg.skipVersion === snapshot.latest) {
+    log(`update: ${snapshot.latest} skipped by settings`)
+    refreshTrayMenu()
+    return
+  }
+  const t = uiT().t
+  const guiVisible = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()
+  if (HIDDEN_MODE || !guiVisible || updateWindow) {
+    if (tray && !tray.isDestroyed()) {
+      tray.displayBalloon({
+        title: APP_NAME,
+        content: t('update.balloon.available', snapshot.latest, snapshot.currentVersion),
+      })
+    }
+    refreshTrayMenu()
+    return
+  }
+  const choice = dialog.showMessageBoxSync(mainWindow, {
+    type: 'info',
+    title: APP_NAME,
+    message: t('update.dialog.title', snapshot.latest),
+    detail: t('update.dialog.detail', snapshot.latest, snapshot.currentVersion),
+    buttons: [t('update.dialog.now'), t('update.dialog.later'), t('update.dialog.skip')],
+    defaultId: 0,
+    cancelId: 1,
+  })
+  if (choice === 0) {
+    ensureUpdateWindow()
+    void startUpdateDownload()
+  } else if (choice === 2) {
+    saveSettings({ skipVersion: snapshot.latest })
+    log(`update: user skipped ${snapshot.latest}`)
+  }
+  refreshTrayMenu()
+}
+
+/**
+ * Queue the silent startup check. Automated modes (smoke/e2e/probe) and the
+ * `DSH_DESKTOP_SKIP_UPDATE_CHECK=1` test hook never touch the network.
+ */
+function scheduleStartupUpdateCheck() {
+  if (NONINTERACTIVE || process.env.DSH_DESKTOP_SKIP_UPDATE_CHECK === '1') return
+  if (settings().checkUpdates === false) {
+    log('update: startup check disabled in settings')
+    return
+  }
+  setTimeout(() => { void autoCheckUpdates() }, UPDATE_CHECK_DELAY_MS).unref()
+}
+
+/**
+ * Keep the download cache bounded: drop installers of the running version
+ * (useless leftovers of a finished upgrade) and anything older than a week,
+ * while preserving a pending download for resume.
+ */
+function pruneUpdateCache() {
+  const dir = updateDownloadDir()
+  let names = []
+  try { names = fs.readdirSync(dir) } catch { return }
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+  for (const name of names) {
+    if (!/\.(exe|part|sha256)$/iu.test(name)) continue
+    const file = path.join(dir, name)
+    if (file === updateState.file) continue
+    try {
+      const stale = fs.statSync(file).mtimeMs < cutoff
+      if (stale || name.includes(app.getVersion())) {
+        fs.rmSync(file, { force: true })
+        log(`update: pruned cached ${name}${stale ? ' (older than 7 days)' : ''}`)
+      }
+    } catch { /* locked or already gone */ }
+  }
+}
+
 /* ------------------------------------------------------------ E2E verdict */
 
 let e2eSettled = false
@@ -893,10 +1326,20 @@ function loadingHtml(text) {
 function buildTrayMenu() {
   const cfg = settings()
   const t = uiT().t
+  const updatePending = updateState.phase === 'available' || updateState.phase === 'ready'
   return Menu.buildFromTemplate([
     { label: t('tray.openMain'), click: () => showMainOrStart() },
     { label: t('tray.openBrowser'), enabled: !!(backend && backend.url), click: () => {
       if (backend && backend.url) shell.openExternal(backend.url)
+    } },
+    { type: 'separator' },
+    ...(updatePending
+      ? [{ label: t('tray.updateAvailable', updateState.latest), click: () => openUpdateWindow('tray') }]
+      : []),
+    { label: t('tray.checkUpdate'), click: () => openUpdateWindow('tray') },
+    { label: t('tray.updateAuto'), type: 'checkbox', checked: cfg.checkUpdates !== false, click: (item) => {
+      saveSettings({ checkUpdates: item.checked })
+      refreshTrayMenu()
     } },
     { type: 'separator' },
     { label: t('tray.restartService'), click: () => restartBackend() },
@@ -959,6 +1402,7 @@ function quitApp() {
   isQuitting = true
   refreshTrayMenu()
   cancelProvision()
+  cancelUpdateDownload()
   stopBackend()
   log('quitting')
   setTimeout(() => app.exit(0), SHUTDOWN_GRACE_MS).unref()
@@ -981,8 +1425,10 @@ if (!gotLock) {
     app.setAppUserModelId('ai.deepseek.dsh.desktop')
     app.setName(APP_NAME)
 
-    if (!SMOKE_MODE && fs.existsSync(ICON_PATH)) createTray()
+    if (!SMOKE_MODE && !UPDATE_PROBE_MODE && fs.existsSync(ICON_PATH)) createTray()
     applyAutoStart()
+    pruneUpdateCache()
+    scheduleStartupUpdateCheck()
 
     // Start-at-login bridge consumed by the Settings → General row in the GUI.
     // Only the GUI window carries the preload, so any other sender is ignored.
@@ -1050,10 +1496,86 @@ if (!gotLock) {
         if (['auto', 'cn', 'direct'].includes(mode)) saveSettings({ mirrorMode: mode })
         return settings().mirrorMode
       })
+
+      // Self-update bridge consumed by the update window only.
+      const updateSenderOk = (event) => Boolean(updateWindow) && event.sender === updateWindow.webContents
+      ipcMain.handle(`${UPDATE_IPC}:get-meta`, (event) => {
+        if (!updateSenderOk(event)) return null
+        return {
+          language: uiLanguageCode(),
+          repo: settings().updateRepo || DEFAULT_UPDATE_REPO,
+          autoStart: false, // main decides when to check (tray/dialog/startup)
+          state: updateSnapshot(),
+        }
+      })
+      ipcMain.handle(`${UPDATE_IPC}:get-state`, (event) => (updateSenderOk(event) ? updateSnapshot() : null))
+      ipcMain.handle(`${UPDATE_IPC}:check`, (event) => {
+        if (!updateSenderOk(event)) return null
+        return checkUpdates('window')
+      })
+      ipcMain.handle(`${UPDATE_IPC}:download`, (event) => {
+        if (!updateSenderOk(event)) return null
+        return startUpdateDownload()
+      })
+      ipcMain.handle(`${UPDATE_IPC}:cancel`, (event) => {
+        if (!updateSenderOk(event)) return null
+        return cancelUpdateDownload()
+      })
+      ipcMain.handle(`${UPDATE_IPC}:install`, (event) => {
+        if (!updateSenderOk(event)) return null
+        return installUpdate()
+      })
+      ipcMain.handle(`${UPDATE_IPC}:skip`, (event) => {
+        if (!updateSenderOk(event)) return null
+        if (updateState.latest) {
+          saveSettings({ skipVersion: updateState.latest })
+          log(`update: skipped ${updateState.latest} from the update window`)
+        }
+        refreshTrayMenu()
+        return pushUpdateState()
+      })
+      ipcMain.handle(`${UPDATE_IPC}:open-release-page`, (event) => {
+        if (!updateSenderOk(event)) return
+        const url = updateState.releaseUrl || updateSnapshot().releaseUrl
+        if (url) shell.openExternal(url)
+      })
+      ipcMain.handle(`${UPDATE_IPC}:reveal-file`, (event) => {
+        if (!updateSenderOk(event)) return
+        if (updateState.file && fs.existsSync(updateState.file)) shell.showItemInFolder(updateState.file)
+      })
+      ipcMain.handle(`${UPDATE_IPC}:open-runtime-wizard`, (event) => {
+        if (!updateSenderOk(event)) return
+        log('update: opening the runtime wizard from the update window')
+        if (updateWindow && !updateWindow.isDestroyed()) updateWindow.close()
+        startProvisioningFlow('runtime update')
+      })
+      ipcMain.handle(`${UPDATE_IPC}:close`, (event) => {
+        if (!updateSenderOk(event)) return
+        if (updateWindow && !updateWindow.isDestroyed()) updateWindow.close()
+      })
+      ipcMain.handle(`${UPDATE_IPC}:set-options`, (event, patch) => {
+        if (!updateSenderOk(event)) return null
+        const next = {}
+        if (patch && typeof patch === 'object') {
+          if (typeof patch.autoCheck === 'boolean') next.checkUpdates = patch.autoCheck
+          if (typeof patch.includePrerelease === 'boolean') next.updateIncludePrerelease = patch.includePrerelease
+          if (typeof patch.mirror === 'string') next.updateMirror = patch.mirror.trim()
+        }
+        if (Object.keys(next).length > 0) {
+          saveSettings(next)
+          log(`update: options ${JSON.stringify(next)}`)
+          refreshTrayMenu()
+        }
+        return pushUpdateState()
+      })
     }
 
     if (SMOKE_MODE) {
       runSmoke().then((code) => { app.exit(code) })
+      return
+    }
+    if (UPDATE_PROBE_MODE) {
+      runUpdateProbe()
       return
     }
     if (E2E_MODE) {
@@ -1078,6 +1600,8 @@ if (!gotLock) {
       { label: amT('appMenu.app'), submenu: [
         { label: amT('appMenu.reload'), accelerator: 'CmdOrCtrl+R', click: () => { mainWindow && mainWindow.webContents.reload() } },
         { label: amT('appMenu.devtools'), accelerator: 'F12', click: () => { mainWindow && mainWindow.webContents.toggleDevTools() } },
+        { type: 'separator' },
+        { label: amT('appMenu.checkUpdate'), click: () => openUpdateWindow('menu') },
         { type: 'separator' },
         { label: amT('dialog.exit'), accelerator: 'CmdOrCtrl+Q', click: () => quitApp() },
       ]},
@@ -1197,6 +1721,67 @@ function runProbe() {
     log(`PROBE: FAIL ${String(error && error.message ? error.message : error)}`)
     stopBackend()
     setTimeout(() => app.exit(1), 250)
+  })
+}
+
+/* ---------------------------------------------------------- update probe */
+
+/**
+ * Headless-ish verification used by `npm run update:probe`: load update.html
+ * in a hidden window, prove the preload bridge answers, run one real release
+ * check through the IPC path, and fail on any renderer console error (the
+ * page's rendering bugs surface there). No backend is started.
+ */
+function runUpdateProbe() {
+  const started = Date.now()
+  log('UPDATE-PROBE: starting')
+  const rendererErrors = []
+  const win = ensureUpdateWindow()
+  win.hide()
+  win.webContents.on('console-message', (...args) => {
+    const first = args[0]
+    if (first && typeof first === 'object' && typeof first.level === 'string') {
+      if (first.level === 'error') rendererErrors.push(String(first.message))
+      return
+    }
+    const level = args[1]
+    const levelName = typeof level === 'string' ? level : ['verbose', 'info', 'warning', 'error'][Number(level)] || ''
+    if (levelName === 'error') rendererErrors.push(String(args[2]))
+  })
+  const finish = (pass, extra) => {
+    log(`UPDATE-PROBE: ${pass ? 'PASS' : 'FAIL'} ${extra} (${Date.now() - started} ms)`)
+    setTimeout(() => app.exit(pass ? 0 : 1), 250)
+  }
+  win.webContents.once('did-finish-load', () => {
+    const pageScript = `(async () => {
+      const meta = await window.__dshUpdate.getMeta()
+      const state = meta && meta.state
+      return {
+        hasBridge: typeof window.__dshUpdate !== 'undefined',
+        language: meta && meta.language,
+        repo: meta && meta.repo,
+        phase: state && state.phase,
+        current: state && state.currentVersion,
+        buttons: document.querySelectorAll('button').length,
+        note: (document.getElementById('note') || {}).textContent || '',
+      }
+    })()`
+    win.webContents.executeJavaScript(pageScript).then((page) => {
+      log(`UPDATE-PROBE: page=${JSON.stringify(page)}`)
+      return win.webContents.executeJavaScript(
+        'window.__dshUpdate.check().then((s) => ({ phase: s && s.phase, latest: s && s.latest, error: s && s.error }))'
+      ).then((checked) => {
+        log(`UPDATE-PROBE: check=${JSON.stringify(checked)}`)
+        const ok = Boolean(
+          page && page.hasBridge === true
+          && page.buttons >= 6
+          && page.language
+          && ['none', 'current', 'available', 'error'].includes(checked && checked.phase)
+          && rendererErrors.length === 0
+        )
+        finish(ok, `errors=${JSON.stringify(rendererErrors)}`)
+      })
+    }).catch((error) => finish(false, String(error && error.message ? error.message : error)))
   })
 }
 

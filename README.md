@@ -4,7 +4,7 @@
 
 An Electron shell that turns the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web GUI into a real Windows desktop app: double-click an icon and the GUI opens in its own window while the checkout's `dsh web` service starts in the background. This directory is the **out-of-repo** shell — it never modifies the deepseek-harness checkout (the only optional, separately distributed change is the start-at-login row in `share/`, see [Optional checkout patch](#optional-checkout-patch)).
 
-Current version: **0.2.6** (Windows x64; NSIS installer + portable exe under `release/`). UI language: English / 中文 (follows the OS by default, switchable from the tray).
+Current version: **0.4.0** (Windows x64; NSIS installer + portable exe under `release/`). UI language: English / 中文 (follows the OS by default, switchable from the tray). Installed builds update themselves from GitHub Releases (see [App updates](#app-updates-self-update)).
 
 ## Features
 
@@ -13,6 +13,7 @@ Current version: **0.2.6** (Windows x64; NSIS installer + portable exe under `re
   - *prebuilt runtime pack*: a zip produced on the release machine, downloaded and extracted as-is (no pnpm/build on the user's side; see [Packaging](#packaging)).
   Mirrors for CN networks, live progress + logs, cancel and resume included.
 - **Works without admin rights** — no Administrator or Windows Developer Mode needed: when `tar.exe` cannot create symlinks the engine falls back to a built-in zip reader, pack aliases are rebuilt as junctions, and git-less source zips get a ref-derived build commit. A machine-installed old Node.js cannot hijack the build (portable Node is pinned first on `PATH`).
+- **Self-update** — installed builds check GitHub Releases on startup (and on demand from the tray), download the new installer with resume, verify it (asset digest / published `.sha256` + size + PE sanity), then upgrade in place silently and relaunch. Portable builds get the verified file instead, since they cannot replace their own exe.
 - **Standalone window** — no browser tabs/chrome; window is the app.
 - **Tray resident** — closing the window hides to the tray and keeps the service running; tray menu can reopen the window, open the GUI in the system browser, restart the service, switch language, or quit (stop service).
 - **Start at login** — runs `--hidden` in the background after sign-in; the tray checkbox and the GUI's Settings → General row share one setting.
@@ -20,7 +21,7 @@ Current version: **0.2.6** (Windows x64; NSIS installer + portable exe under `re
 - **Automatic port** — default `port: 0` lets the OS pick a free port; never collides with other `dsh web` instances.
 - **Hardened shell** — `contextIsolation` + `sandbox`, no `nodeIntegration`; external http(s) links open in the system browser; navigation is locked to the GUI origin.
 - **Visible failures** — main-process crashes are written to `desktop.log` + `crashes.log` and shown in an error dialog (0.2.1+); a failing window icon falls back to the exe icon so the taskbar never shows a blank button (0.2.6+).
-- **Self-tests** — `smoke` / `e2e` / `probe` / `provision:selftest` (see [Automated checks](#automated-checks)).
+- **Self-tests** — `smoke` / `e2e` / `probe` / `provision:selftest` / `update:selftest` / `update:probe` (see [Automated checks](#automated-checks)).
 
 ## How it works
 
@@ -99,6 +100,11 @@ Roughly **3 GB** disk and **10–40 minutes** depending on the network. Notes:
 | `language` | `"auto"` | UI language: `auto` (OS) / `zh` / `en` (0.3.0+; also switchable from the tray) |
 | `dshRef` | `null` | override the deepseek-harness ref (default from manifest) |
 | `nodeMirrorBase` / `registryMirror` / `githubProxies` | `null` | advanced mirror overrides (npmmirror + built-in proxies by default) |
+| `checkUpdates` | `true` | silent release check on startup (tray checkbox mirrors it) |
+| `skipVersion` | `""` | version the user chose to skip (e.g. `0.4.1`) |
+| `updateIncludePrerelease` | `false` | also consider pre-releases |
+| `updateMirror` | `""` | optional prefix for GitHub download URLs (e.g. `https://ghfast.top`); empty = direct, then built-in accelerators |
+| `updateRepo` | `""` (built-in) | `owner/name` of the release repository, for forks |
 
 Changes to `port`/`extraArgs`/`repoPath` apply after tray → Restart service.
 
@@ -117,6 +123,35 @@ Constraint: the harness engines accept **`^22.19.0 || >=24.0.0`** only (20/23 ar
 - restart the wizard: it resumes and only redoes "new Node → build";
 - prebuilt packs embed their Node: rebuild with `npm run pack:runtime -- --node-version 24.8.0` and switch `pack.url`;
 - dev/zip layout: point `settings.json` `nodePath` or `DSH_DESKTOP_NODE` at any node.exe, then Restart service (provisioning always uses its own portable Node — use "Choose an existing checkout…" to run your own).
+
+## App updates (self-update)
+
+The shell updates **itself** from this repository's GitHub Releases; the harness **runtime** is versioned separately and is still installed/updated by the setup wizard (the wizard offers a shortcut whenever an app upgrade pins a newer dsh ref — see `runtimeOutdated` in the update window footer).
+
+How it works (`updater.js`, pure Node + `--selftest`):
+
+1. **Check** — `GET /repos/<repo>/releases/latest` (or `/releases` when pre-releases are enabled), semver comparison including pre-release identifiers against `app.getVersion()`.
+2. **Download** — `DeepSeek-Harness-Desktop-Setup-<version>.exe` into `%APPDATA%\DeepSeek Harness Desktop\updates`, resumable (`Range`) and mirror-aware: `updateMirror` prefix → direct GitHub → built-in accelerators (`mirrorMode: cn` tries the accelerators first).
+3. **Verify** — GitHub's asset `digest`, else the published `.sha256` sidecar; then size and PE-header checks. Any mismatch deletes the file.
+4. **Install** — `Setup-<version>.exe --updated /S --force-run`: electron-builder's NSIS installer skips its pages, upgrades the registry-recorded install directory in place, and relaunches the app.
+
+Where it surfaces:
+
+| Entry point | Behavior |
+|---|---|
+| Startup (8 s after launch) | silent check; a newer version shows a dialog — *Update now* / *Later* / *Skip this version* |
+| Autostart (`--hidden`) | tray balloon only, never a modal dialog |
+| Tray → Check for updates… | opens the update window (version, release notes, progress, options) |
+| Tray → ⬆ Update available | appears while an update is pending |
+| App menu → Check for updates… | same window |
+
+Notes and limits:
+
+- The app currently installed must be ≥ 0.4.0 — earlier builds have no updater, so the first hop is a manual install. Afterwards upgrades are one click.
+- The update window is a separate window: **closing it does not stop the download** (it resumes/picks up from disk when reopened); quit or *Cancel* stops it, keeping the partial file for resume.
+- Portable builds cannot replace their own exe: they download + verify the installer and offer *Show file*. Unpackaged dev runs behave the same way (`DSH_DESKTOP_FORCE_UPDATE_INSTALL=1` forces the real hand-off for testing).
+- Behind a proxy/CDN that blocks GitHub, set `updateMirror` (e.g. `https://ghfast.top`) or switch `mirrorMode` to `cn`.
+- The installer is not code-signed, so Windows SmartScreen may warn on the very first install; in-place upgrades are silent.
 
 ## Quick start (dev / zip layout)
 
@@ -143,6 +178,7 @@ Then launch the **DeepSeek Harness** shortcut. If the checkout is not the siblin
 | Click tray icon | open the main window |
 | Tray → Open in system browser | open the current GUI URL in the default browser |
 | Tray → Restart service | restart the backend (re-reads settings.json) |
+| Tray → Check for updates… | open the update window (version check + release notes) |
 | Tray → Language | switch UI language immediately |
 | Tray → Quit (stop service) | kill the backend process tree and exit |
 | Ctrl+R / F12 / Ctrl+Q | reload / devtools / quit |
@@ -157,12 +193,14 @@ Logs: main process + `dsh web` output go to `%USERPROFILE%\.dsh-desktop-logs\des
 | `npm run e2e` | real window: GUI page loads → auto-exit |
 | `npm run probe` | real window DOM: opens Settings → General, asserts the "Start at login" row + bridge (`DSH_PROBE_TOGGLE=1` toggles twice) |
 | `npm run provision:selftest` | engine offline self-test (no network/Electron) |
+| `npm run update:selftest` | updater offline drill: semver, release parsing, asset picking, download/resume/verify against a local fixture server |
+| `npm run update:probe` | real window: loads update.html through the preload bridge, runs one live release check, fails on renderer console errors |
 
 > `probe` expects the optional checkout patch + rebuilt web client; without it the row does not exist and probe exits 1 by design.
 
 ### Debug environment variables
 
-`DSH_DESKTOP_REPO`, `DSH_DESKTOP_NODE`, `DSH_DESKTOP_FORCE_PROVISION=1`, `DSH_PROVISION_FILELOG=1`, `DSH_FORCE_NODE_UNZIP=1`, `DSH_PACK_DEBUG=1`, `ELECTRON_MIRROR`/`ELECTRON_BUILDER_BINARIES_MIRROR`.
+`DSH_DESKTOP_REPO`, `DSH_DESKTOP_NODE`, `DSH_DESKTOP_FORCE_PROVISION=1`, `DSH_PROVISION_FILELOG=1`, `DSH_FORCE_NODE_UNZIP=1`, `DSH_PACK_DEBUG=1`, `DSH_DESKTOP_SKIP_UPDATE_CHECK=1` (never touch the update server), `DSH_DESKTOP_FORCE_UPDATE_INSTALL=1` (let a dev run hand the installer to Windows), `ELECTRON_MIRROR`/`ELECTRON_BUILDER_BINARIES_MIRROR`.
 
 ## Optional checkout patch
 
@@ -190,7 +228,9 @@ Outputs (installer flow: welcome → license → per-user/all-users → folder �
 - `DeepSeek-Harness-Desktop-Portable-<version>.exe` — portable single exe;
 - `win-unpacked/` — unpacked layout.
 
-Version comes from `package.json`; artifacts use `${version}`. On GitHub, the [build workflow](.github/workflows/build.yml) packages every push and publishes a GitHub Release for `v*` tags.
+Version comes from `package.json`; artifacts use `${version}`. Build scripts pass `--publish never` (electron-builder would otherwise demand a `GH_TOKEN` and try to publish implicitly on tag pushes); the [build workflow](.github/workflows/build.yml) runs both engine self-tests, packages every push, attaches a `.sha256` checksum next to each exe on tag builds, and publishes the GitHub Release for `v*` tags — that release is what the in-app updater consumes.
+
+**Releasing an update**: bump `package.json` version → commit → `git tag vX.Y.Z && git push origin vX.Y.Z` → wait for the workflow → verify the release lists `DeepSeek-Harness-Desktop-Setup-X.Y.Z.exe` (+ `.sha256`, `.blockmap`, portable). Installed apps then see the new version within one startup check.
 
 ### Prebuilt runtime pack (optional channel)
 
@@ -224,6 +264,10 @@ Users then only download → verify → extract (minutes), no pnpm/build on thei
 - **Two instances share session data**: don't run the shell while another `dsh web` (browser GUI) uses the same `~/.dsh`.
 - **Antivirus/firewall**: first-run provisioning downloads and runs node/pnpm — allow `%APPDATA%\DeepSeek Harness Desktop\runtime` if blocked.
 - **Uninstall residue**: the installer keeps `%APPDATA%\DeepSeek Harness Desktop` (settings + runtime, ≈3 GB). Uninstall first, then delete the folder for a full cleanup.
+- **Update check fails**: the update window names the reason (HTTP 404, unreachable, checksum mismatch). CN networks and corporate proxies usually need an `updateMirror` prefix or `mirrorMode: cn`; "no published releases yet" means the tag's Release has not been built (see [Packaging](#packaging)).
+- **Update download interrupted**: closing the window does not stop it — reopen to see progress. The partial file stays in `%APPDATA%\DeepSeek Harness Desktop\updates` and the next *Download update* resumes it.
+- **The app did not restart after upgrading**: `--force-run` only applies to a silent install. If SmartScreen blocked the installer, run the Setup manually once; settings and data are untouched (they live in `%APPDATA%`).
+- **Still on the old version after upgrading**: the NSIS installer upgrades the directory recorded in the registry — if the install folder was moved by hand, reinstall once with the new Setup.
 
 ## Version history
 
@@ -238,6 +282,7 @@ Users then only download → verify → extract (minutes), no pnpm/build on thei
 | 0.2.5 | Portable Node pinned on PATH for provisioning and backend children |
 | 0.2.6 | Window icon fallback to exe icon (blank taskbar fix) |
 | 0.3.0 | i18n (zh/en UI + docs), language switch in tray, GitHub CI + Release, MIT |
+| 0.4.0 | Self-update from GitHub Releases: startup check with skip-version, update window (notes/progress/options), resumable verified download, silent in-place NSIS upgrade; CI `--publish never` fix + `.sha256` assets |
 
 ## License
 

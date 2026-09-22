@@ -6,32 +6,49 @@ on:
     tags: ['v*']
   pull_request:
 
+# The release job creates/updates a GitHub Release with the built installers.
+permissions:
+  contents: write
+
 jobs:
   test:
     name: Engine self-test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: node provision.js --selftest
+      - name: Runtime provisioning engine
+        run: node provision.js --selftest
+      - name: Self-update engine
+        run: node updater.js --selftest
 
   package:
     name: Package Windows installers
     needs: test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - name: Build NSIS installer + portable exe
+        # `--publish never` keeps electron-builder from implicitly publishing on
+        # tag pushes (it would demand GH_TOKEN); the release step below owns that.
         run: npm run dist
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem release/DeepSeek-Harness-Desktop-*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Set-Content -Encoding ascii "$($_.FullName).sha256"
+            Write-Host "$($_.Name) $hash"
+          }
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -39,7 +56,9 @@ jobs:
           path: |
             release/DeepSeek-Harness-Desktop-Setup-*.exe
             release/DeepSeek-Harness-Desktop-Setup-*.exe.blockmap
+            release/DeepSeek-Harness-Desktop-Setup-*.exe.sha256
             release/DeepSeek-Harness-Desktop-Portable-*.exe
+            release/DeepSeek-Harness-Desktop-Portable-*.exe.sha256
             release/builder-effective-config.yaml
       - name: Publish GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
@@ -48,5 +67,7 @@ jobs:
           files: |
             release/DeepSeek-Harness-Desktop-Setup-*.exe
             release/DeepSeek-Harness-Desktop-Setup-*.exe.blockmap
+            release/DeepSeek-Harness-Desktop-Setup-*.exe.sha256
             release/DeepSeek-Harness-Desktop-Portable-*.exe
+            release/DeepSeek-Harness-Desktop-Portable-*.exe.sha256
           generate_release_notes: true

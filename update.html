@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title data-i18n="page.title">DeepSeek Harness — App update</title>
+<style>
+  :root {
+    --bg: #0d1526; --panel: #131d33; --panel2: #18243d; --border: #26334d;
+    --text: #dbe4f5; --muted: #7d8db0; --accent: #4d6bfe; --ok: #34c77b;
+    --warn: #e8b339; --err: #ff6b6b; --mono: "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif; display: flex; flex-direction: column; }
+  header { padding: 14px 22px 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; -webkit-app-region: drag; }
+  header .logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, #4d6bfe, #8a5cf6); display: flex; align-items: center; justify-content: center; font-size: 16px; flex: none; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .wrap { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding: 16px 22px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .card h2 { margin: 0 0 10px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .meta { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; }
+  .meta .k { color: var(--muted); }
+  .meta .v { font-weight: 600; }
+  .meta code, .foot code { font-family: var(--mono); font-size: 11.5px; background: #0b1220; padding: 1px 5px; border-radius: 4px; }
+  .badge { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); vertical-align: 1px; }
+  .badge.new { border-color: var(--accent); color: #a9bbff; background: rgba(77, 107, 254, .12); }
+  .badge.ok { border-color: var(--ok); color: var(--ok); background: rgba(52, 199, 123, .1); }
+  .badge.warn { border-color: var(--warn); color: var(--warn); background: rgba(232, 179, 57, .1); }
+  #note { min-height: 22px; font-size: 13.5px; white-space: pre-line; }
+  #note.running { color: #aebfe8; }
+  #note.ok { color: var(--ok); }
+  #note.err { color: #ffb3b3; }
+  .pbar { height: 8px; border-radius: 5px; background: #0b1220; overflow: hidden; margin-top: 10px; display: none; }
+  .pbar .fill { height: 100%; width: 0; background: linear-gradient(90deg, #4d6bfe, #8a5cf6); transition: width .2s; }
+  .pmeta { color: var(--muted); font-size: 12px; margin-top: 4px; min-height: 16px; }
+  .errbox { display: none; background: rgba(255, 107, 107, .07); border: 1px solid var(--err); color: #ffb3b3; padding: 10px 12px; border-radius: 8px; font-size: 12.5px; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: auto; margin-top: 10px; }
+  #notes { margin: 0; font: 12.5px/1.6 var(--mono); color: #b9c6e2; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
+  #notesCard { display: none; }
+  .opt { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 13px; }
+  .opt:last-child { margin-bottom: 0; }
+  .opt input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); flex: none; }
+  .opt input[type=text] { font: inherit; flex: 1; min-width: 120px; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+  .opt .hint { color: var(--muted); font-size: 11.5px; }
+  #actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  button { font: inherit; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); padding: 8px 16px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { filter: brightness(1.1); }
+  button.ghost { border-color: transparent; color: var(--muted); }
+  button.ghost:hover { color: var(--text); border-color: var(--border); }
+  button:disabled { opacity: .45; cursor: default; }
+  button:disabled:hover { border-color: var(--border); filter: none; }
+  .foot { padding: 8px 22px 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11.5px; display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+  #runtimeNote { display: none; color: var(--warn); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🐋</div>
+  <div>
+    <h1 data-i18n="page.heading">DeepSeek Harness Desktop — App update</h1>
+    <div class="sub" id="sub"></div>
+  </div>
+</header>
+<div class="wrap">
+  <div class="card">
+    <h2 data-i18n="ver.title">Versions</h2>
+    <div class="meta">
+      <div class="k" data-i18n="ver.current">Installed</div>
+      <div class="v"><code id="current">—</code></div>
+      <div class="k" data-i18n="ver.latest">Latest</div>
+      <div class="v"><code id="latest">—</code><span class="badge" id="badge"></span></div>
+      <div class="k" data-i18n="ver.published">Published</div>
+      <div class="v" id="published">—</div>
+    </div>
+    <div id="note" style="margin-top:10px">…</div>
+    <div class="pbar" id="pbar"><div class="fill" id="pfill"></div></div>
+    <div class="pmeta" id="pmeta"></div>
+    <div class="errbox" id="errbox"></div>
+  </div>
+  <div class="card" id="notesCard">
+    <h2 data-i18n="notes.title">What's new</h2>
+    <pre id="notes"></pre>
+  </div>
+  <div class="card">
+    <h2 data-i18n="opt.title">Options</h2>
+    <div class="opt">
+      <input type="checkbox" id="optAuto">
+      <label for="optAuto" data-i18n="opt.auto">Check for updates on startup</label>
+    </div>
+    <div class="opt">
+      <input type="checkbox" id="optPre">
+      <label for="optPre" data-i18n="opt.prerelease">Include pre-releases</label>
+    </div>
+    <div class="opt">
+      <label for="optMirror" data-i18n="opt.mirror">Download mirror</label>
+      <input type="text" id="optMirror" spellcheck="false" placeholder="https://ghfast.top">
+    </div>
+    <div class="opt"><span class="hint" data-i18n="opt.mirrorHint">Optional prefix for GitHub download URLs (leave empty for direct access; built-in accelerators are tried as a fallback).</span></div>
+  </div>
+  <div class="card">
+    <div id="actions">
+      <button id="btnCheck" class="primary" data-i18n="btn.check">Check for updates</button>
+      <button id="btnDownload" data-i18n="btn.download">Download update</button>
+      <button id="btnInstall" class="primary" data-i18n="btn.install">Install and restart</button>
+      <button id="btnSkip" class="ghost" data-i18n="btn.skip">Skip this version</button>
+      <button id="btnRelease" class="ghost" data-i18n="btn.release">Open release page</button>
+      <button id="btnReveal" class="ghost" data-i18n="btn.reveal">Show downloaded file</button>
+      <button id="btnClose" class="ghost" data-i18n="btn.close">Close</button>
+    </div>
+  </div>
+</div>
+<div class="foot">
+  <span id="repoLine"><span data-i18n="foot.repo">Repository:</span> <code id="repo"></code></span>
+  <span id="portableNote" data-i18n="foot.portable" style="display:none">Portable build: the update is downloaded for you to place manually.</span>
+  <span id="runtimeNote"><span data-i18n="foot.runtimeStale">A newer harness runtime is available.</span> <button id="btnWizard" class="ghost" data-i18n="btn.wizard">Open runtime setup</button></span>
+</div>
+<script>
+'use strict'
+/* global __dshUpdate */
+const $ = (id) => document.getElementById(id)
+const DICTS = {
+  zh: {
+    'page.title': 'DeepSeek Harness — 版本更新',
+    'page.heading': 'DeepSeek Harness 桌面版 — 版本更新',
+    'ver.title': '版本',
+    'ver.current': '当前版本',
+    'ver.latest': '最新版本',
+    'ver.published': '发布时间',
+    'badge.new': '有新版本',
+    'badge.ok': '已是最新',
+    'badge.err': '检查失败',
+    'notes.title': '更新内容',
+    'opt.title': '选项',
+    'opt.auto': '启动时自动检查更新',
+    'opt.prerelease': '包含预发布版本',
+    'opt.mirror': '下载镜像:',
+    'opt.mirrorHint': '可选:GitHub 下载地址的加速前缀(留空=直连,失败时自动尝试内置加速)。',
+    'btn.check': '检查更新',
+    'btn.checking': '正在检查…',
+    'btn.download': '下载更新',
+    'btn.cancel': '取消下载',
+    'btn.downloading': '正在下载…',
+    'btn.install': '安装并重启',
+    'btn.installing': '正在安装…',
+    'btn.skip': '跳过此版本',
+    'btn.release': '打开发布页面',
+    'btn.reveal': '打开文件位置',
+    'btn.close': '关闭',
+    'btn.wizard': '打开运行环境安装',
+    'foot.repo': '仓库:',
+    'foot.portable': '便携版:更新会下载到本地,请手动替换 exe。',
+    'foot.runtimeStale': '检测到新的运行环境(dsh)版本。',
+    'note.idle': '点击「检查更新」查看是否有新版本。',
+    'note.checking': '正在检查更新…',
+    'note.current': '已是最新版本({0})。',
+    'note.none': '该仓库还没有发布任何版本。',
+    'note.available': '发现新版本 {0}(当前 {1})。',
+    'note.downloading': '正在下载 {0} …',
+    'note.ready': '更新包已下载并通过完整性校验,点击「安装并重启」完成升级。',
+    'note.readyPortable': '更新包已下载并通过完整性校验。便携版请手动替换 exe(已为你打开文件位置)。',
+    'note.readyDev': '更新包已下载并通过校验。开发模式(未打包)不会自动安装。',
+    'note.installing': '正在启动安装程序,应用即将退出并自动重启…',
+    'note.error': '检查或下载失败。',
+    'note.skip': '已跳过版本 {0},可在设置中清除(tray 菜单「自动检查更新」)。',
+    'err.api404': '仓库或发布版本不存在(HTTP 404)。',
+    'err.api': 'GitHub API 请求失败,可能是网络或限流问题。',
+    'err.network': '网络不可用:无法连接更新服务器。可尝试填写「下载镜像」前缀。',
+    'err.sha': '下载文件校验和不匹配,已删除该文件,请重试。',
+    'err.size': '下载文件大小与发布记录不一致,已删除该文件,请重试。',
+    'err.pe': '下载内容不是 Windows 可执行文件(可能被网络劫持),已删除。',
+    'err.io': '文件操作失败。',
+    'err.cancelled': '已取消。',
+    'pmeta.of': '{0} / {1}',
+    'pmeta.done': '共 {0}',
+  },
+  en: {
+    'page.title': 'DeepSeek Harness — App update',
+    'page.heading': 'DeepSeek Harness Desktop — App update',
+    'ver.title': 'Versions',
+    'ver.current': 'Installed',
+    'ver.latest': 'Latest',
+    'ver.published': 'Published',
+    'badge.new': 'Update available',
+    'badge.ok': 'Up to date',
+    'badge.err': 'Check failed',
+    'notes.title': "What's new",
+    'opt.title': 'Options',
+    'opt.auto': 'Check for updates on startup',
+    'opt.prerelease': 'Include pre-releases',
+    'opt.mirror': 'Download mirror:',
+    'opt.mirrorHint': 'Optional prefix for GitHub download URLs (empty = direct; built-in accelerators are tried as a fallback).',
+    'btn.check': 'Check for updates',
+    'btn.checking': 'Checking…',
+    'btn.download': 'Download update',
+    'btn.cancel': 'Cancel download',
+    'btn.downloading': 'Downloading…',
+    'btn.install': 'Install and restart',
+    'btn.installing': 'Installing…',
+    'btn.skip': 'Skip this version',
+    'btn.release': 'Open release page',
+    'btn.reveal': 'Show downloaded file',
+    'btn.close': 'Close',
+    'btn.wizard': 'Open runtime setup',
+    'foot.repo': 'Repository:',
+    'foot.portable': 'Portable build: the update is downloaded for you to place manually.',
+    'foot.runtimeStale': 'A newer harness runtime is available.',
+    'note.idle': 'Click "Check for updates" to look for a newer version.',
+    'note.checking': 'Checking for updates…',
+    'note.current': 'You are on the latest version ({0}).',
+    'note.none': 'This repository has no published releases yet.',
+    'note.available': 'Version {0} is available (you have {1}).',
+    'note.downloading': 'Downloading {0} …',
+    'note.ready': 'The update was downloaded and verified. Click "Install and restart" to upgrade.',
+    'note.readyPortable': 'The update was downloaded and verified. Portable builds replace the exe manually (the file location was opened for you).',
+    'note.readyDev': 'The update was downloaded and verified. Unpackaged dev runs cannot self-install.',
+    'note.installing': 'Launching the installer — the app will exit and restart automatically…',
+    'note.error': 'Checking or downloading failed.',
+    'note.skip': 'Version {0} is skipped; clear it from the tray menu.',
+    'err.api404': 'Repository or release not found (HTTP 404).',
+    'err.api': 'The GitHub API request failed (network or rate limit).',
+    'err.network': 'No network: the update server is unreachable. Try setting a download mirror prefix.',
+    'err.sha': 'Checksum mismatch — the download was deleted, please retry.',
+    'err.size': 'The download size does not match the release record — deleted, please retry.',
+    'err.pe': 'The download is not a Windows executable (possible interception) — deleted.',
+    'err.io': 'File operation failed.',
+    'err.cancelled': 'Cancelled.',
+    'pmeta.of': '{0} / {1}',
+    'pmeta.done': '{0} total',
+  },
+}
+let lang = 'en'
+let state = null
+let downloading = false
+
+function t(key, ...args) {
+  const dict = DICTS[lang] || DICTS.en
+  let text = Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] : DICTS.en[key]
+  if (text === undefined) text = key
+  return String(text).replace(/\{(\d+)\}/g, (m, i) => (args[Number(i)] === undefined ? m : String(args[Number(i)])))
+}
+
+function applyI18n() {
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
+  for (const node of document.querySelectorAll('[data-i18n]')) node.textContent = t(node.getAttribute('data-i18n'))
+  document.title = t('page.title')
+}
+
+function fmtBytes(bytes) {
+  const n = Number(bytes) || 0
+  if (n < 1024) return n + ' B'
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB'
+  return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB'
+}
+
+function fmtDate(text) {
+  if (!text) return '—'
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) return text
+  return date.toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US')
+}
+
+function setNote(text, kind) {
+  const node = $('note')
+  node.textContent = text
+  node.className = kind || ''
+}
+
+function errorText(err) {
+  if (!err) return ''
+  const text = t('err.' + err.code)
+  if (text !== 'err.' + err.code) return err.message ? text + '\n' + err.message : text
+  return err.message || String(err)
+}
+
+function renderProgress(received, total) {
+  const bar = $('pbar')
+  const fill = $('pfill')
+  bar.style.display = 'block'
+  const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0
+  fill.style.width = pct + '%'
+  $('pmeta').textContent = total > 0
+    ? t('pmeta.of', fmtBytes(received), fmtBytes(total)) + ' · ' + pct + '%'
+    : t('pmeta.done', fmtBytes(received))
+}
+
+function show(el, visible) { el.style.display = visible ? '' : 'none' }
+
+function render() {
+  const s = state || {}
+  const phase = s.phase || 'idle'
+  $('current').textContent = s.currentVersion || '—'
+  $('latest').textContent = s.latest || '—'
+  $('published').textContent = fmtDate(s.release && s.release.publishedAt)
+  $('repo').textContent = s.repo || ''
+
+  const badge = $('badge')
+  badge.className = 'badge'
+  if (phase === 'available' || phase === 'downloading' || phase === 'ready' || phase === 'installing') { badge.classList.add('new'); badge.textContent = t('badge.new') }
+  else if (phase === 'current' || phase === 'none') { badge.classList.add('ok'); badge.textContent = t('badge.ok') }
+  else if (phase === 'error') { badge.classList.add('warn'); badge.textContent = t('badge.err') }
+  else badge.textContent = ''
+
+  const notes = (s.release && s.release.notes) || s.notes || ''
+  $('notes').textContent = notes
+  show($('notesCard'), Boolean(notes))
+
+  // Status line + progress bar.
+  if (phase === 'checking') setNote(t('note.checking'), 'running')
+  else if (phase === 'current') setNote(t('note.current', s.latest || s.currentVersion), 'ok')
+  else if (phase === 'none') setNote(t('note.none'))
+  else if (phase === 'available') {
+    const skipped = s.options && s.options.skipVersion && s.options.skipVersion === s.latest
+    setNote(t('note.available', s.latest, s.currentVersion) + (s.asset ? ' · ' + fmtBytes(s.asset.size) : '') + (skipped ? '\n' + t('note.skip', s.latest) : ''))
+  }
+  else if (phase === 'downloading') setNote(t('note.downloading', s.asset ? s.asset.name : ''), 'running')
+  else if (phase === 'ready') setNote(t(s.packaged === false ? 'note.readyDev' : (s.portable ? 'note.readyPortable' : 'note.ready')), 'ok')
+  else if (phase === 'installing') setNote(t('note.installing'), 'running')
+  else if (phase === 'error') setNote(t('note.error'), 'err')
+  else setNote(t('note.idle'))
+
+  show($('pbar'), phase === 'downloading' || phase === 'ready')
+  if (phase === 'ready' && s.progress && s.progress.total > 0) renderProgress(s.progress.total, s.progress.total)
+  else if (phase === 'downloading') renderProgress((s.progress && s.progress.received) || 0, (s.progress && s.progress.total) || 0)
+  else if (phase !== 'ready') $('pmeta').textContent = ''
+
+  const err = $('errbox')
+  if (phase === 'error' && s.error) { err.textContent = errorText(s.error); err.style.display = 'block' }
+  else { err.style.display = 'none' }
+
+  // Buttons.
+  const busy = phase === 'checking' || phase === 'downloading' || phase === 'installing'
+  $('btnCheck').disabled = busy
+  $('btnCheck').textContent = phase === 'checking' ? t('btn.checking') : t('btn.check')
+  $('btnDownload').disabled = !(phase === 'available' || phase === 'downloading' || phase === 'error')
+  $('btnDownload').textContent = phase === 'downloading' ? t('btn.cancel') : t('btn.download')
+  $('btnDownload').className = phase === 'available' ? 'primary' : ''
+  $('btnInstall').disabled = phase !== 'ready'
+  $('btnInstall').textContent = phase === 'installing' ? t('btn.installing') : t('btn.install')
+  $('btnSkip').disabled = !(phase === 'available' || phase === 'ready')
+  $('btnRelease').disabled = !(s.releaseUrl || (s.release && s.release.url))
+  $('btnReveal').disabled = !s.file
+  $('optAuto').checked = s.options ? s.options.autoCheck !== false : true
+  $('optPre').checked = Boolean(s.options && s.options.includePrerelease)
+  if (document.activeElement !== $('optMirror')) $('optMirror').value = (s.options && s.options.mirror) || ''
+  show($('portableNote'), Boolean(s.portable))
+  show($('runtimeNote'), Boolean(s.runtimeOutdated))
+}
+
+function setState(next) {
+  state = next || {}
+  render()
+}
+
+async function boot() {
+  const meta = await __dshUpdate.getMeta()
+  lang = meta.language === 'zh' ? 'zh' : 'en'
+  applyI18n()
+  $('sub').textContent = t('foot.repo') + ' ' + (meta.repo || '')
+  setState(meta.state)
+  __dshUpdate.onEvent((evt) => {
+    if (!evt) return
+    if (evt.type === 'state') setState(evt.state)
+    else if (evt.type === 'progress') renderProgress(evt.received, evt.total)
+  })
+  if (meta.autoStart !== false && (!meta.state || meta.state.phase === 'idle')) {
+    try { await __dshUpdate.check() } catch { /* state carries the error */ }
+  } else {
+    setState(await __dshUpdate.getState())
+  }
+}
+
+$('btnCheck').onclick = () => { __dshUpdate.check().catch(() => {}) }
+$('btnDownload').onclick = () => {
+  if (state && state.phase === 'downloading') __dshUpdate.cancel().catch(() => {})
+  else __dshUpdate.download().catch(() => {})
+}
+$('btnInstall').onclick = () => { __dshUpdate.install().catch(() => {}) }
+$('btnSkip').onclick = () => { __dshUpdate.skip().catch(() => {}) }
+$('btnRelease').onclick = () => { __dshUpdate.openReleasePage().catch(() => {}) }
+$('btnReveal').onclick = () => { __dshUpdate.revealFile().catch(() => {}) }
+$('btnClose').onclick = () => { __dshUpdate.close().catch(() => {}) }
+$('btnWizard').onclick = () => { __dshUpdate.openRuntimeWizard().catch(() => {}) }
+$('optAuto').onchange = () => { __dshUpdate.setOptions({ autoCheck: $('optAuto').checked }).catch(() => {}) }
+$('optPre').onchange = () => { __dshUpdate.setOptions({ includePrerelease: $('optPre').checked }).catch(() => {}) }
+$('optMirror').onchange = () => { __dshUpdate.setOptions({ mirror: $('optMirror').value.trim() }).catch(() => {}) }
+
+boot().catch((error) => {
+  setNote(String(error && error.message ? error.message : error), 'err')
+})
+</script>
+</body>
+</html>
